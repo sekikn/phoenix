@@ -116,6 +116,7 @@ import org.apache.phoenix.schema.PColumn;
 import org.apache.phoenix.schema.PDatum;
 import org.apache.phoenix.schema.PTable;
 import org.apache.phoenix.schema.PTable.IndexType;
+import org.apache.phoenix.schema.PTable.StorageScheme;
 import org.apache.phoenix.schema.PTableType;
 import org.apache.phoenix.schema.RowKeyValueAccessor;
 import org.apache.phoenix.schema.SortOrder;
@@ -133,6 +134,7 @@ import org.apache.phoenix.schema.types.PTimestamp;
 import org.apache.phoenix.schema.types.PUnsignedTimestamp;
 import org.apache.phoenix.schema.types.PVarbinary;
 import org.apache.phoenix.schema.types.PhoenixArray;
+import org.apache.phoenix.util.EncodedColumnsUtil;
 import org.apache.phoenix.util.ExpressionUtil;
 import org.apache.phoenix.util.IndexUtil;
 import org.apache.phoenix.util.SchemaUtil;
@@ -407,7 +409,7 @@ public class ExpressionCompiler extends UnsupportedAllParseNodeVisitor<Expressio
             return LiteralExpression.newConstant(column.getDataType().toObject(ptr), column.getDataType());
         }
         if (tableRef.equals(context.getCurrentTable()) && !SchemaUtil.isPKColumn(column)) { // project only kv columns
-            context.getScan().addColumn(column.getFamilyName().getBytes(), column.getName().getBytes());
+            EncodedColumnsUtil.setColumns(column, tableRef.getTable(), context.getScan());
         }
         Expression expression = ref.newColumnExpression(node.isTableNameCaseSensitive(), node.isCaseSensitive());
         Expression wrappedExpression = wrapGroupByExpression(expression);

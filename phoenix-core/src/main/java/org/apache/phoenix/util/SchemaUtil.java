@@ -44,8 +44,10 @@ import javax.annotation.Nullable;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.TableName;
+import org.apache.hadoop.hbase.io.ImmutableBytesWritable;
 import org.apache.hadoop.hbase.io.encoding.DataBlockEncoding;
 import org.apache.hadoop.hbase.util.Bytes;
+import org.apache.phoenix.exception.DataExceedsCapacityException;
 import org.apache.phoenix.exception.SQLExceptionCode;
 import org.apache.phoenix.exception.SQLExceptionInfo;
 import org.apache.phoenix.expression.Expression;
@@ -154,8 +156,9 @@ public class SchemaUtil {
     			rowSize += KeyValue.getKeyValueDataStructureSize(keyLength, column.getFamilyName().getBytes().length, column.getName().getBytes().length, valueLength);
     		}
     	}
+    	byte[] emptyKeyValueKV = EncodedColumnsUtil.getEmptyKeyValueInfo(table).getFirst();
     	// Empty key value
-    	rowSize += KeyValue.getKeyValueDataStructureSize(keyLength, getEmptyColumnFamily(table).length, QueryConstants.EMPTY_COLUMN_BYTES.length, 0);
+    	rowSize += KeyValue.getKeyValueDataStructureSize(keyLength, getEmptyColumnFamily(table).length, emptyKeyValueKV.length, 0);
     	return rowSize;
     }
     
@@ -394,7 +397,7 @@ public class SchemaUtil {
                 }
             } else {
                 try {
-                    return table.getColumnFamily(familyName.getString()).getColumn(column.getName().getString()).getName().getString();
+                    return table.getColumnFamily(familyName.getString()).getPColumnForColumnName(column.getName().getString()).getName().getString();
                 } catch (ColumnFamilyNotFoundException e) {
                     continue; // Shouldn't happen
                 } catch (ColumnNotFoundException e) {
@@ -591,7 +594,7 @@ public class SchemaUtil {
     
     public static boolean columnExists(PTable table, String columnName) {
         try {
-            table.getColumn(columnName);
+            table.getPColumnForColumnName(columnName);
             return true;
         } catch (ColumnNotFoundException e) {
             return false;
@@ -1020,7 +1023,7 @@ public class SchemaUtil {
         }
         return getStrippedName(physicalTableName, indexPrefix);
     }
-
+    
     private static String getStrippedName(String physicalTableName, String indexPrefix) {
         return physicalTableName.indexOf(indexPrefix) == 0 ? physicalTableName.substring(indexPrefix.length())
                 : physicalTableName;
@@ -1039,6 +1042,23 @@ public class SchemaUtil {
                     normalizeIdentifier(tableName));
         } else {
             return normalizeIdentifier(tableName);
+        }
+    }
+
+    /**
+     * Pads the data in ptr by the required amount for fixed width data types
+     */
+    public static void padData(String tableName, PColumn column, ImmutableBytesWritable ptr) {
+        PDataType type = column.getDataType();
+        byte[] byteValue = ptr.get();
+        boolean isNull = type.isNull(byteValue);
+        Integer maxLength = column.getMaxLength();
+        if (!isNull && type.isFixedWidth() && maxLength != null) {
+            if (ptr.getLength() < maxLength) {
+                type.pad(ptr, maxLength, column.getSortOrder());
+            } else if (ptr.getLength() > maxLength) {
+                throw new DataExceedsCapacityException(tableName + "." + column.getName().getString() + " may not exceed " + maxLength + " bytes (" + type.toObject(byteValue) + ")");
+            }
         }
     }
 }

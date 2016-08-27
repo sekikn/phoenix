@@ -838,7 +838,7 @@ public class IndexExpressionIT extends BaseHBaseManagedTimeIT {
 	
 	        // make sure that the tables are empty, but reachable
 	        conn.createStatement().execute(
-	          "CREATE TABLE t (k VARCHAR NOT NULL PRIMARY KEY, v1 VARCHAR, v2 VARCHAR)");
+	          "CREATE TABLE t (k VARCHAR NOT NULL PRIMARY KEY, v1 VARCHAR, v2 VARCHAR) " + (!mutable ? "IMMUTABLE_ROWS=true": ""));
 	        query = "SELECT * FROM t" ;
 	        rs = conn.createStatement().executeQuery(query);
 	        assertFalse(rs.next());
@@ -1202,12 +1202,21 @@ public class IndexExpressionIT extends BaseHBaseManagedTimeIT {
     }
     
     @Test
-    public void testViewUsesTableIndex() throws Exception {
+    public void testViewUsesMutableTableIndex() throws Exception {
+        helpTestViewUsesTableIndex(false);
+    }
+    
+    @Test
+    public void testViewUsesImmutableTableIndex() throws Exception {
+        helpTestViewUsesTableIndex(true);
+    }
+    
+    private void helpTestViewUsesTableIndex(boolean immutable) throws Exception {
         Connection conn = DriverManager.getConnection(getUrl());
         try 
         {
         	ResultSet rs;
-	        String ddl = "CREATE TABLE t (k1 INTEGER NOT NULL, k2 INTEGER NOT NULL, s1 VARCHAR, s2 VARCHAR, s3 VARCHAR, s4 VARCHAR CONSTRAINT pk PRIMARY KEY (k1, k2))";
+	        String ddl = "CREATE TABLE t (k1 INTEGER NOT NULL, k2 INTEGER NOT NULL, s1 VARCHAR, s2 VARCHAR, s3 VARCHAR, s4 VARCHAR CONSTRAINT pk PRIMARY KEY (k1, k2)) " + (immutable ? "IMMUTABLE_ROWS = true" : "");
 	        conn.createStatement().execute(ddl);
 	        conn.createStatement().execute("CREATE INDEX i1 ON t(k2, s2, s3, s1)");
 	        conn.createStatement().execute("CREATE INDEX i2 ON t(k2, s2||'_'||s3, s1, s4)");
@@ -1300,7 +1309,7 @@ public class IndexExpressionIT extends BaseHBaseManagedTimeIT {
 		try {
 			conn.createStatement().execute(
 					"CREATE TABLE t (k VARCHAR NOT NULL PRIMARY KEY, v VARCHAR) "
-							+ (mutable ? "IMMUTABLE_ROWS=true" : ""));
+							+ (!mutable ? "IMMUTABLE_ROWS=true" : ""));
 			String query = "SELECT * FROM t";
 			ResultSet rs = conn.createStatement().executeQuery(query);
 			assertFalse(rs.next());

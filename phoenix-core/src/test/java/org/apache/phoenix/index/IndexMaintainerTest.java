@@ -135,14 +135,13 @@ public class IndexMaintainerTest  extends BaseConnectionlessQueryTest {
             }
             ValueGetter valueGetter = newValueGetter(row, valueMap);
             
-            List<Mutation> indexMutations =
-                    IndexTestUtil.generateIndexData(index, table, dataMutation, ptr, builder);
+            List<Mutation> indexMutations = IndexTestUtil.generateIndexData(index, table, dataMutation, ptr, builder);
             assertEquals(1,indexMutations.size());
             assertTrue(indexMutations.get(0) instanceof Put);
             Mutation indexMutation = indexMutations.get(0);
             ImmutableBytesWritable indexKeyPtr = new ImmutableBytesWritable(indexMutation.getRow());
             ptr.set(rowKeyPtr.get(), rowKeyPtr.getOffset(), rowKeyPtr.getLength());
-            byte[] mutablelndexRowKey = im1.buildRowKey(valueGetter, ptr, null, null);
+            byte[] mutablelndexRowKey = im1.buildRowKey(valueGetter, ptr, null, null, false);
             byte[] immutableIndexRowKey = indexKeyPtr.copyBytes();
             assertArrayEquals(immutableIndexRowKey, mutablelndexRowKey);
             for (ColumnReference ref : im1.getCoveredColumns()) {

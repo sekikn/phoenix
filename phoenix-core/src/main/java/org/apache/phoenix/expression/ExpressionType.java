@@ -280,7 +280,8 @@ public enum ExpressionType {
     FloorYearExpression(FloorYearExpression.class),
     CeilWeekExpression(CeilWeekExpression.class),
     CeilMonthExpression(CeilMonthExpression.class),
-    CeilYearExpression(CeilYearExpression.class);
+    CeilYearExpression(CeilYearExpression.class),
+    ArrayColumnExpression(ArrayColumnExpression.class);
     
     ExpressionType(Class<? extends Expression> clazz) {
         this.clazz = clazz;

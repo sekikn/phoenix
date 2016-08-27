@@ -94,7 +94,6 @@ import org.apache.tephra.TransactionManager;
 import org.apache.tephra.TransactionSystemClient;
 import org.apache.tephra.inmemory.InMemoryTxSystemClient;
 
-
 /**
  *
  * Implementation of ConnectionQueryServices used in testing where no connection to
