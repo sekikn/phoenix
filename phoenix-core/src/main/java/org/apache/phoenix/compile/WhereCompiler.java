@@ -29,6 +29,8 @@ import org.apache.hadoop.hbase.filter.Filter;
 import org.apache.phoenix.exception.SQLExceptionCode;
 import org.apache.phoenix.exception.SQLExceptionInfo;
 import org.apache.phoenix.expression.AndExpression;
+import org.apache.phoenix.expression.ArrayColumnExpression;
+import org.apache.phoenix.expression.ColumnExpression;
 import org.apache.phoenix.expression.Determinism;
 import org.apache.phoenix.expression.Expression;
 import org.apache.phoenix.expression.KeyValueColumnExpression;
@@ -51,11 +53,13 @@ import org.apache.phoenix.schema.ColumnNotFoundException;
 import org.apache.phoenix.schema.ColumnRef;
 import org.apache.phoenix.schema.PTable;
 import org.apache.phoenix.schema.PTable.IndexType;
+import org.apache.phoenix.schema.PTable.StorageScheme;
 import org.apache.phoenix.schema.PTableType;
 import org.apache.phoenix.schema.TableRef;
 import org.apache.phoenix.schema.TypeMismatchException;
 import org.apache.phoenix.schema.types.PBoolean;
 import org.apache.phoenix.util.ByteUtil;
+import org.apache.phoenix.util.EncodedColumnsUtil;
 import org.apache.phoenix.util.ScanUtil;
 import org.apache.phoenix.util.SchemaUtil;
 
@@ -168,12 +172,14 @@ public class WhereCompiler {
         public Expression visit(ColumnParseNode node) throws SQLException {
             ColumnRef ref = resolveColumn(node);
             TableRef tableRef = ref.getTableRef();
+            ColumnExpression newColumnExpression = ref.newColumnExpression(node.isTableNameCaseSensitive(), node.isCaseSensitive());
             if (tableRef.equals(context.getCurrentTable()) && !SchemaUtil.isPKColumn(ref.getColumn())) {
+                byte[] cq = tableRef.getTable().getStorageScheme() == StorageScheme.COLUMNS_STORED_IN_SINGLE_CELL 
+                		? ref.getColumn().getFamilyName().getBytes() : EncodedColumnsUtil.getColumnQualifier(ref.getColumn(), tableRef.getTable());
                 // track the where condition columns. Later we need to ensure the Scan in HRS scans these column CFs
-                context.addWhereCoditionColumn(ref.getColumn().getFamilyName().getBytes(), ref.getColumn().getName()
-                        .getBytes());
+                context.addWhereCoditionColumn(ref.getColumn().getFamilyName().getBytes(), cq);
             }
-            return ref.newColumnExpression(node.isTableNameCaseSensitive(), node.isCaseSensitive());
+			return newColumnExpression;
         }
 
         @Override
@@ -194,7 +200,7 @@ public class WhereCompiler {
             // just use that.
             try {
                 if (!SchemaUtil.isPKColumn(ref.getColumn())) {
-                    table.getColumn(ref.getColumn().getName().getString());
+                    table.getPColumnForColumnName(ref.getColumn().getName().getString());
                 }
             } catch (AmbiguousColumnException e) {
                 disambiguateWithFamily = true;
@@ -222,6 +228,22 @@ public class WhereCompiler {
 
             }
         }
+        
+        public void increment(ArrayColumnExpression column) {
+            switch (count) {
+                case NONE:
+                    count = Count.SINGLE;
+                    this.column = column.getArrayExpression();
+                    break;
+                case SINGLE:
+                    count = column.getArrayExpression().equals(this.column) ? Count.SINGLE : Count.MULTIPLE;
+                    break;
+                case MULTIPLE:
+                    break;
+
+            }
+        }
+        
         public Count getCount() {
             return count;
         }
@@ -253,6 +275,12 @@ public class WhereCompiler {
 
                 @Override
                 public Void visit(KeyValueColumnExpression expression) {
+                    counter.increment(expression);
+                    return null;
+                }
+                
+                @Override
+                public Void visit(ArrayColumnExpression expression) {
                     counter.increment(expression);
                     return null;
                 }

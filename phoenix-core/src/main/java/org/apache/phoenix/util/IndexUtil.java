@@ -18,14 +18,19 @@
 package org.apache.phoenix.util;
 
 import static org.apache.phoenix.query.QueryConstants.LOCAL_INDEX_COLUMN_FAMILY_PREFIX;
+import static org.apache.phoenix.query.QueryConstants.VALUE_COLUMN_FAMILY;
+import static org.apache.phoenix.query.QueryConstants.VALUE_COLUMN_QUALIFIER;
+
 import java.io.ByteArrayInputStream;
 import java.io.DataInputStream;
 import java.io.IOException;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.HConstants;
@@ -45,6 +50,7 @@ import org.apache.hadoop.hbase.coprocessor.RegionCoprocessorEnvironment;
 import org.apache.hadoop.hbase.io.ImmutableBytesWritable;
 import org.apache.hadoop.hbase.regionserver.HRegion;
 import org.apache.hadoop.hbase.util.Bytes;
+import org.apache.hadoop.hbase.util.Pair;
 import org.apache.hadoop.io.WritableUtils;
 import org.apache.phoenix.compile.ColumnResolver;
 import org.apache.phoenix.compile.FromCompiler;
@@ -54,7 +60,9 @@ import org.apache.phoenix.compile.WhereCompiler;
 import org.apache.phoenix.coprocessor.BaseScannerRegionObserver;
 import org.apache.phoenix.exception.SQLExceptionCode;
 import org.apache.phoenix.exception.SQLExceptionInfo;
+import org.apache.phoenix.execute.MutationState.RowMutationState;
 import org.apache.phoenix.execute.TupleProjector;
+import org.apache.phoenix.expression.ArrayColumnExpression;
 import org.apache.phoenix.expression.Expression;
 import org.apache.phoenix.expression.KeyValueColumnExpression;
 import org.apache.phoenix.expression.RowKeyColumnExpression;
@@ -78,13 +86,16 @@ import org.apache.phoenix.schema.PColumn;
 import org.apache.phoenix.schema.PColumnFamily;
 import org.apache.phoenix.schema.PTable;
 import org.apache.phoenix.schema.PTableType;
+import org.apache.phoenix.schema.SortOrder;
 import org.apache.phoenix.schema.TableNotFoundException;
 import org.apache.phoenix.schema.TableRef;
+import org.apache.phoenix.schema.ValueSchema.Field;
 import org.apache.phoenix.schema.tuple.ResultTuple;
 import org.apache.phoenix.schema.tuple.Tuple;
 import org.apache.phoenix.schema.types.PBinary;
 import org.apache.phoenix.schema.types.PDataType;
 import org.apache.phoenix.schema.types.PDecimal;
+import org.apache.phoenix.schema.types.PInteger;
 import org.apache.phoenix.schema.types.PVarbinary;
 import org.apache.phoenix.schema.types.PVarchar;
 
@@ -192,7 +203,7 @@ public class IndexUtil {
             throw new IllegalArgumentException("Could not find column family \"" +  indexColumnName.substring(0, pos) + "\" in index column name of \"" + indexColumnName + "\"", e);
         }
         try {
-            return family.getColumn(indexColumnName.substring(pos+1));
+            return family.getPColumnForColumnName(indexColumnName.substring(pos+1));
         } catch (ColumnNotFoundException e) {
             throw new IllegalArgumentException("Could not find column \"" +  indexColumnName.substring(pos+1) + "\" in index column name of \"" + indexColumnName + "\"", e);
         }
@@ -219,10 +230,11 @@ public class IndexUtil {
 
     private static boolean isEmptyKeyValue(PTable table, ColumnReference ref) {
         byte[] emptyKeyValueCF = SchemaUtil.getEmptyColumnFamily(table);
+        byte[] emptyKeyValueQualifier = EncodedColumnsUtil.getEmptyKeyValueInfo(table).getFirst();
         return (Bytes.compareTo(emptyKeyValueCF, 0, emptyKeyValueCF.length, ref.getFamilyWritable()
                 .get(), ref.getFamilyWritable().getOffset(), ref.getFamilyWritable().getLength()) == 0 && Bytes
-                .compareTo(QueryConstants.EMPTY_COLUMN_BYTES, 0,
-                    QueryConstants.EMPTY_COLUMN_BYTES.length, ref.getQualifierWritable().get(), ref
+                .compareTo(emptyKeyValueQualifier, 0,
+                        emptyKeyValueQualifier.length, ref.getQualifierWritable().get(), ref
                             .getQualifierWritable().getOffset(), ref.getQualifierWritable()
                             .getLength()) == 0);
     }
@@ -254,10 +266,10 @@ public class IndexUtil {
     }
     
     public static List<Mutation> generateIndexData(final PTable table, PTable index,
-            List<Mutation> dataMutations, final KeyValueBuilder kvBuilder, PhoenixConnection connection)
+            final Map<ImmutableBytesPtr, RowMutationState> valuesMap, List<Mutation> dataMutations, final KeyValueBuilder kvBuilder, PhoenixConnection connection)
             throws SQLException {
         try {
-        	final ImmutableBytesWritable ptr = new ImmutableBytesWritable();
+        	final ImmutableBytesPtr ptr = new ImmutableBytesPtr();
             IndexMaintainer maintainer = index.getIndexMaintainer(table, connection);
             List<Mutation> indexMutations = Lists.newArrayListWithExpectedSize(dataMutations.size());
             for (final Mutation dataMutation : dataMutations) {
@@ -286,20 +298,21 @@ public class IndexUtil {
                             if (isEmptyKeyValue(table, ref)) {
                                 return null;
                             }
-                            Map<byte [], List<Cell>> familyMap = dataMutation.getFamilyCellMap();
                             byte[] family = ref.getFamily();
-                            List<Cell> kvs = familyMap.get(family);
-                            if (kvs == null) {
-                                return null;
-                            }
                             byte[] qualifier = ref.getQualifier();
-                            for (Cell kv : kvs) {
-                                if (Bytes.compareTo(kv.getFamilyArray(), kv.getFamilyOffset(), kv.getFamilyLength(), family, 0, family.length) == 0 &&
-                                    Bytes.compareTo(kv.getQualifierArray(), kv.getQualifierOffset(), kv.getQualifierLength(), qualifier, 0, qualifier.length) == 0) {
-                                  ImmutableBytesPtr ptr = new ImmutableBytesPtr();
-                                  kvBuilder.getValueAsPtr(kv, ptr);
-                                  return ptr;
-                                }
+                            RowMutationState rowMutationState = valuesMap.get(ptr);
+                            PColumn column = null;
+                            try {
+                                column = table.getColumnFamily(family).getPColumnForColumnQualifier(qualifier);
+                            } catch (ColumnNotFoundException e) {
+                            } catch (ColumnFamilyNotFoundException e) {
+                            }
+                            if (rowMutationState!=null && column!=null) {
+                                byte[] value = rowMutationState.getColumnValues().get(column);
+                                ImmutableBytesPtr ptr = new ImmutableBytesPtr();
+                                ptr.set(value==null ? ByteUtil.EMPTY_BYTE_ARRAY : value);
+                                SchemaUtil.padData(table.getName().getString(), column, ptr);
+                                return ptr;
                             }
                             return null;
                         }
@@ -312,7 +325,7 @@ public class IndexUtil {
                         regionStartKey = tableRegionLocation.getRegionInfo().getStartKey();
                         regionEndkey = tableRegionLocation.getRegionInfo().getEndKey();
                     }
-                    indexMutations.add(maintainer.buildUpdateMutation(kvBuilder, valueGetter, ptr, ts, regionStartKey, regionEndkey));
+                    indexMutations.add(maintainer.buildUpdateMutation(kvBuilder, valueGetter, ptr, ts, regionStartKey, regionEndkey, true));
                 }
             }
             return indexMutations;
@@ -426,13 +439,18 @@ public class IndexUtil {
     public static TupleProjector getTupleProjector(Scan scan, ColumnReference[] dataColumns) {
         if (dataColumns != null && dataColumns.length != 0) {
             KeyValueSchema keyValueSchema = deserializeLocalIndexJoinSchemaFromScan(scan); 
-            KeyValueColumnExpression[] keyValueColumns = new KeyValueColumnExpression[dataColumns.length];
+            boolean storeColsInSingleCell = scan.getAttribute(BaseScannerRegionObserver.COLUMNS_STORED_IN_SINGLE_CELL)!=null;
+            Expression[] colExpressions = storeColsInSingleCell ? new ArrayColumnExpression[dataColumns.length] : new KeyValueColumnExpression[dataColumns.length];
             for (int i = 0; i < dataColumns.length; i++) {
-                ColumnReference dataColumn = dataColumns[i];
-                KeyValueColumnExpression dataColumnExpr = new KeyValueColumnExpression(keyValueSchema.getField(i), dataColumn.getFamily(), dataColumn.getQualifier());
-                keyValueColumns[i] = dataColumnExpr;
+                byte[] family = dataColumns[i].getFamily();
+                byte[] qualifier = dataColumns[i].getQualifier();
+                Field field = keyValueSchema.getField(i);
+                Expression dataColumnExpr =
+                        storeColsInSingleCell ? new ArrayColumnExpression(field, family, PInteger.INSTANCE.getCodec().decodeInt(qualifier, 0, SortOrder.getDefault())) 
+                            : new KeyValueColumnExpression(field, family, qualifier);
+                colExpressions[i] = dataColumnExpr;
             }
-            return new TupleProjector(keyValueSchema, keyValueColumns);
+            return new TupleProjector(keyValueSchema, colExpressions);
         }
         return null;
     }
@@ -501,139 +519,142 @@ public class IndexUtil {
             }
             
             // TODO: handle null case (but shouldn't happen)
+            //TODO: samarth confirm if this is the right thing to do here i.e. pass false for look up.
             Tuple joinTuple = new ResultTuple(joinResult);
             // This will create a byte[] that captures all of the values from the data table
             byte[] value =
                     tupleProjector.getSchema().toBytes(joinTuple, tupleProjector.getExpressions(),
                         tupleProjector.getValueBitSet(), ptr);
             KeyValue keyValue =
-                    KeyValueUtil.newKeyValue(firstCell.getRowArray(),firstCell.getRowOffset(),firstCell.getRowLength(), TupleProjector.VALUE_COLUMN_FAMILY,
-                        TupleProjector.VALUE_COLUMN_QUALIFIER, firstCell.getTimestamp(), value, 0, value.length);
+                    KeyValueUtil.newKeyValue(firstCell.getRowArray(),firstCell.getRowOffset(),firstCell.getRowLength(), VALUE_COLUMN_FAMILY,
+                        VALUE_COLUMN_QUALIFIER, firstCell.getTimestamp(), value, 0, value.length);
             result.add(keyValue);
         }
         for (int i = 0; i < result.size(); i++) {
             final Cell cell = result.get(i);
-            // TODO: Create DelegateCell class instead
-            Cell newCell = new Cell() {
+            if (cell != null) {
+                // TODO: Create DelegateCell class instead
+                Cell newCell = new Cell() {
 
-                @Override
-                public byte[] getRowArray() {
-                    return cell.getRowArray();
-                }
+                    @Override
+                    public byte[] getRowArray() {
+                        return cell.getRowArray();
+                    }
 
-                @Override
-                public int getRowOffset() {
-                    return cell.getRowOffset() + offset;
-                }
+                    @Override
+                    public int getRowOffset() {
+                        return cell.getRowOffset() + offset;
+                    }
 
-                @Override
-                public short getRowLength() {
-                    return (short)(cell.getRowLength() - offset);
-                }
+                    @Override
+                    public short getRowLength() {
+                        return (short)(cell.getRowLength() - offset);
+                    }
 
-                @Override
-                public byte[] getFamilyArray() {
-                    return cell.getFamilyArray();
-                }
+                    @Override
+                    public byte[] getFamilyArray() {
+                        return cell.getFamilyArray();
+                    }
 
-                @Override
-                public int getFamilyOffset() {
-                    return cell.getFamilyOffset();
-                }
+                    @Override
+                    public int getFamilyOffset() {
+                        return cell.getFamilyOffset();
+                    }
 
-                @Override
-                public byte getFamilyLength() {
-                    return cell.getFamilyLength();
-                }
+                    @Override
+                    public byte getFamilyLength() {
+                        return cell.getFamilyLength();
+                    }
 
-                @Override
-                public byte[] getQualifierArray() {
-                    return cell.getQualifierArray();
-                }
+                    @Override
+                    public byte[] getQualifierArray() {
+                        return cell.getQualifierArray();
+                    }
 
-                @Override
-                public int getQualifierOffset() {
-                    return cell.getQualifierOffset();
-                }
+                    @Override
+                    public int getQualifierOffset() {
+                        return cell.getQualifierOffset();
+                    }
 
-                @Override
-                public int getQualifierLength() {
-                    return cell.getQualifierLength();
-                }
+                    @Override
+                    public int getQualifierLength() {
+                        return cell.getQualifierLength();
+                    }
 
-                @Override
-                public long getTimestamp() {
-                    return cell.getTimestamp();
-                }
+                    @Override
+                    public long getTimestamp() {
+                        return cell.getTimestamp();
+                    }
 
-                @Override
-                public byte getTypeByte() {
-                    return cell.getTypeByte();
-                }
+                    @Override
+                    public byte getTypeByte() {
+                        return cell.getTypeByte();
+                    }
 
-                @Override
-                public long getMvccVersion() {
-                    return cell.getMvccVersion();
-                }
+                    @Override
+                    public long getMvccVersion() {
+                        return cell.getMvccVersion();
+                    }
 
-                @Override
-                public byte[] getValueArray() {
-                    return cell.getValueArray();
-                }
+                    @Override
+                    public byte[] getValueArray() {
+                        return cell.getValueArray();
+                    }
 
-                @Override
-                public int getValueOffset() {
-                    return cell.getValueOffset();
-                }
+                    @Override
+                    public int getValueOffset() {
+                        return cell.getValueOffset();
+                    }
 
-                @Override
-                public int getValueLength() {
-                    return cell.getValueLength();
-                }
+                    @Override
+                    public int getValueLength() {
+                        return cell.getValueLength();
+                    }
 
-                @Override
-                public byte[] getTagsArray() {
-                    return cell.getTagsArray();
-                }
+                    @Override
+                    public byte[] getTagsArray() {
+                        return cell.getTagsArray();
+                    }
 
-                @Override
-                public int getTagsOffset() {
-                    return cell.getTagsOffset();
-                }
+                    @Override
+                    public int getTagsOffset() {
+                        return cell.getTagsOffset();
+                    }
 
-                @Override
-                public short getTagsLength() {
-                    return cell.getTagsLength();
-                }
+                    @Override
+                    public short getTagsLength() {
+                        return cell.getTagsLength();
+                    }
 
-                @Override
-                public byte[] getValue() {
-                    return cell.getValue();
-                }
+                    @Override
+                    public byte[] getValue() {
+                        return cell.getValue();
+                    }
 
-                @Override
-                public byte[] getFamily() {
-                    return cell.getFamily();
-                }
+                    @Override
+                    public byte[] getFamily() {
+                        return cell.getFamily();
+                    }
 
-                @Override
-                public byte[] getQualifier() {
-                    return cell.getQualifier();
-                }
+                    @Override
+                    public byte[] getQualifier() {
+                        return cell.getQualifier();
+                    }
 
-                @Override
-                public byte[] getRow() {
-                    return cell.getRow();
-                }
+                    @Override
+                    public byte[] getRow() {
+                        return cell.getRow();
+                    }
 
-                @Override
-                @Deprecated
-                public int getTagsLengthUnsigned() {
-                    return cell.getTagsLengthUnsigned();
-                }
-            };
-            // Wrap cell in cell that offsets row key
-            result.set(i, newCell);
+                    @Override
+                    @Deprecated
+                    public int getTagsLengthUnsigned() {
+                        return cell.getTagsLengthUnsigned();
+                    }
+                };
+                // Wrap cell in cell that offsets row key
+                result.set(i, newCell);
+            }
         }
     }
     
@@ -686,4 +707,5 @@ public class IndexUtil {
         }
         return true;
     }
+    
 }

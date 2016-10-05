@@ -284,7 +284,8 @@ public enum ExpressionType {
     CeilMonthExpression(CeilMonthExpression.class),
     CeilYearExpression(CeilYearExpression.class),
     DayOfWeekFunction(DayOfWeekFunction.class),
-    DayOfYearFunction(DayOfYearFunction.class);
+    DayOfYearFunction(DayOfYearFunction.class),
+    ArrayColumnExpression(ArrayColumnExpression.class);
     
     ExpressionType(Class<? extends Expression> clazz) {
         this.clazz = clazz;

@@ -65,7 +65,7 @@ public class AlterTableWithViewsIT extends ParallelStatsDisabledIT {
     public static Collection<Boolean> data() {
         return Arrays.asList(false, true);
     }
-	
+    
     private String generateDDL(String format) {
         return String.format(format, isMultiTenant ? "TENANT_ID VARCHAR NOT NULL, " : "",
             isMultiTenant ? "TENANT_ID, " : "", isMultiTenant ? "MULTI_TENANT=true" : "");
