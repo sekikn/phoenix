@@ -63,12 +63,6 @@ public abstract class SingleKeyValueComparisonFilter extends BooleanExpressionFi
                 cq = expression.getColumnQualifier();
                 return null;
             }
-            @Override
-            public Void visit(ArrayColumnExpression expression) {
-                cf = expression.getArrayExpression().getColumnFamily();
-                cq = expression.getArrayExpression().getColumnQualifier();
-                return null;
-            }
         };
         expression.accept(visitor);
     }

@@ -23,6 +23,7 @@ import java.io.DataInputStream;
 import java.io.DataOutput;
 import java.io.DataOutputStream;
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -60,7 +61,6 @@ import org.apache.phoenix.expression.ExpressionType;
 import org.apache.phoenix.expression.KeyValueColumnExpression;
 import org.apache.phoenix.expression.LiteralExpression;
 import org.apache.phoenix.expression.visitor.KeyValueExpressionVisitor;
-import org.apache.phoenix.expression.visitor.ReplaceArrayColumnWithKeyValueColumnExpressionVisitor;
 import org.apache.phoenix.hbase.index.ValueGetter;
 import org.apache.phoenix.hbase.index.covered.update.ColumnReference;
 import org.apache.phoenix.hbase.index.util.ImmutableBytesPtr;
@@ -337,13 +337,7 @@ public class IndexMaintainer implements Writable, Iterable<ColumnReference> {
         this.isMultiTenant = dataTable.isMultiTenant();
         this.viewIndexId = index.getViewIndexId() == null ? null : MetaDataUtil.getViewIndexIdDataType().toBytes(index.getViewIndexId());
         this.isLocalIndex = index.getIndexType() == IndexType.LOCAL;
-        /* 
-         * There is nothing to prevent new indexes on existing tables to have encoded column names.
-         * Except, due to backward compatibility reasons, we aren't able to change IndexMaintainer and the state
-         * that is serialized in it. Because of this we are forced to have the indexes inherit the
-         * storage scheme of the parent data tables. 
-         */
-        this.usesEncodedColumnNames = EncodedColumnsUtil.usesEncodedColumnNames(dataTable);
+        this.usesEncodedColumnNames = EncodedColumnsUtil.usesEncodedColumnNames(index);
         byte[] indexTableName = index.getPhysicalName().getBytes();
         // Use this for the nDataSaltBuckets as we need this for local indexes
         // TODO: persist nDataSaltBuckets separately, but maintain b/w compat.
@@ -526,7 +520,7 @@ public class IndexMaintainer implements Writable, Iterable<ColumnReference> {
         initCachedState();
     }
     
-    public byte[] buildRowKey(ValueGetter valueGetter, ImmutableBytesWritable rowKeyPtr, byte[] regionStartKey, byte[] regionEndKey, boolean convertArrayColToKeyValueCol)  {
+    public byte[] buildRowKey(ValueGetter valueGetter, ImmutableBytesWritable rowKeyPtr, byte[] regionStartKey, byte[] regionEndKey)  {
         ImmutableBytesWritable ptr = new ImmutableBytesWritable();
         boolean prependRegionStartKey = isLocalIndex && regionStartKey != null;
         boolean isIndexSalted = !isLocalIndex && nIndexSaltBuckets > 0;
@@ -595,9 +589,6 @@ public class IndexMaintainer implements Writable, Iterable<ColumnReference> {
                 SortOrder dataSortOrder;
                 if (dataPkPosition[i] == EXPRESSION_NOT_PRESENT) {
                 	Expression expression = expressionIterator.next();
-                	if (convertArrayColToKeyValueCol) {
-                	    expression = expression.accept(new ReplaceArrayColumnWithKeyValueColumnExpressionVisitor());
-                	}
                 	dataColumnType = expression.getDataType();
                 	dataSortOrder = expression.getSortOrder();
                     isNullable = expression.isNullable();
@@ -930,11 +921,11 @@ public class IndexMaintainer implements Writable, Iterable<ColumnReference> {
         return indexRowKeySchema;
     }
 
-    public Put buildUpdateMutation(KeyValueBuilder kvBuilder, ValueGetter valueGetter, ImmutableBytesWritable dataRowKeyPtr, long ts, byte[] regionStartKey, byte[] regionEndKey, boolean convertArrayColToKeyValueCol) throws IOException {
-        Put put = null;
+    public Put buildUpdateMutation(KeyValueBuilder kvBuilder, ValueGetter valueGetter, ImmutableBytesWritable dataRowKeyPtr, long ts, byte[] regionStartKey, byte[] regionEndKey) throws IOException {
+    	byte[] indexRowKey = this.buildRowKey(valueGetter, dataRowKeyPtr, regionStartKey, regionEndKey);
+    	Put put = null;
         // New row being inserted: add the empty key value
         if (valueGetter.getLatestValue(dataEmptyKeyValueRef) == null) {
-            byte[] indexRowKey = this.buildRowKey(valueGetter, dataRowKeyPtr, regionStartKey, regionEndKey, convertArrayColToKeyValueCol);
             put = new Put(indexRowKey);
             // add the keyvalue for the empty row
             put.add(kvBuilder.buildPut(new ImmutableBytesPtr(indexRowKey),
@@ -943,40 +934,71 @@ public class IndexMaintainer implements Writable, Iterable<ColumnReference> {
                 emptyKeyValueQualifierPtr));
             put.setDurability(!indexWALDisabled ? Durability.USE_DEFAULT : Durability.SKIP_WAL);
         }
-        byte[] indexRowKey = this.buildRowKey(valueGetter, dataRowKeyPtr, regionStartKey, regionEndKey, convertArrayColToKeyValueCol);
         ImmutableBytesPtr rowKey = new ImmutableBytesPtr(indexRowKey);
         if (storeColsInSingleCell) {
-            // map from column family to list of columns (for covered columns)
-            Map<String, List<ColumnReference>> familyToColListMap = Maps.newHashMap();
+            // map from index column family to list of pair of index column and data column (for covered columns)
+            Map<ByteBuffer, List<Pair<ColumnReference, ColumnReference>>> familyToColListMap = Maps.newHashMap();
             for (ColumnReference ref : this.getCoveredColumns()) {
-                String cf = Bytes.toString(ref.getFamily());
+            	ColumnReference indexColRef = this.coveredColumnsMap.get(ref);
+                ByteBuffer cf = ByteBuffer.wrap(indexColRef.getFamily());
                 if (!familyToColListMap.containsKey(cf)) {
-                    familyToColListMap.put(cf, Lists.<ColumnReference>newArrayList());
+                    familyToColListMap.put(cf, Lists.<Pair<ColumnReference, ColumnReference>>newArrayList());
                 }
-                familyToColListMap.get(cf).add(ref);
+                familyToColListMap.get(cf).add(Pair.newPair(indexColRef, ref));
             }
             // iterate over each column family and create a byte[] containing all the columns 
-            for (Entry<String, List<ColumnReference>> entry : familyToColListMap.entrySet()) {
-                byte[] columnFamily = entry.getKey().getBytes();
-                List<ColumnReference> colRefs = entry.getValue();
+            for (Entry<ByteBuffer, List<Pair<ColumnReference, ColumnReference>>> entry : familyToColListMap.entrySet()) {
+                byte[] columnFamily = entry.getKey().array();
+                List<Pair<ColumnReference, ColumnReference>> colRefPairs = entry.getValue();
                 int maxIndex = Integer.MIN_VALUE;
                 // find the max col qualifier
-                for (ColumnReference colRef : colRefs) {
-                    byte[] qualifier = this.coveredColumnsMap.get(colRef).getQualifier();
+                for (Pair<ColumnReference, ColumnReference> colRefPair : colRefPairs) {
+                    byte[] qualifier = colRefPair.getFirst().getQualifier();
                     maxIndex = Math.max(maxIndex, PInteger.INSTANCE.getCodec().decodeInt(qualifier, 0, SortOrder.getDefault()));
                 }
                 byte[][] colValues = new byte[maxIndex+1][];
                 // set the values of the columns
-                for (ColumnReference colRef : colRefs) {
-                    ImmutableBytesWritable value = valueGetter.getLatestValue(colRef);
-                    if (value != null) {
-                        byte[] qualifier = this.coveredColumnsMap.get(colRef).getQualifier();
-                        int index = PInteger.INSTANCE.getCodec().decodeInt(qualifier, 0, SortOrder.getDefault());
-                        colValues[index] = value.get();
+                for (Pair<ColumnReference, ColumnReference> colRefPair : colRefPairs) {
+                	ColumnReference indexColRef = colRefPair.getFirst();
+                	ColumnReference dataColRef = colRefPair.getSecond();
+                	int dataArrayPos = PInteger.INSTANCE.getCodec().decodeInt(dataColRef.getQualifier(), 0, SortOrder.getDefault());
+                	Expression expression = new ArrayColumnExpression(new PDatum() {
+						@Override
+						public boolean isNullable() {
+							return false;
+						}
+						
+						@Override
+						public SortOrder getSortOrder() {
+							return null;
+						}
+						
+						@Override
+						public Integer getScale() {
+							return null;
+						}
+						
+						@Override
+						public Integer getMaxLength() {
+							return null;
+						}
+						
+						@Override
+						public PDataType getDataType() {
+							return null;
+						}
+					}, dataColRef.getFamily(), dataArrayPos);
+                	ImmutableBytesPtr ptr = new ImmutableBytesPtr();
+                    expression.evaluate(new ValueGetterTuple(valueGetter), ptr);
+                    byte[] value = ptr.copyBytesIfNecessary();
+					if (value != null) {
+						byte[] qualifier = indexColRef.getQualifier();
+                        int indexArrayPos = PInteger.INSTANCE.getCodec().decodeInt(qualifier, 0, SortOrder.getDefault());
+                        colValues[indexArrayPos] = value;
                     }
                 }
                 
-                List<Expression> children = Lists.newArrayListWithExpectedSize(colRefs.size());
+                List<Expression> children = Lists.newArrayListWithExpectedSize(colRefPairs.size());
                 // create an expression list with all the columns
                 for (int j=0; j<colValues.length; ++j) {
                     children.add(new LiteralExpression(colValues[j]==null ? ByteUtil.EMPTY_BYTE_ARRAY : colValues[j] ));
@@ -1087,7 +1109,7 @@ public class IndexMaintainer implements Writable, Iterable<ColumnReference> {
     
     @SuppressWarnings("deprecation")
     public Delete buildDeleteMutation(KeyValueBuilder kvBuilder, ValueGetter oldState, ImmutableBytesWritable dataRowKeyPtr, Collection<KeyValue> pendingUpdates, long ts, byte[] regionStartKey, byte[] regionEndKey) throws IOException {
-        byte[] indexRowKey = this.buildRowKey(oldState, dataRowKeyPtr, regionStartKey, regionEndKey, false);
+        byte[] indexRowKey = this.buildRowKey(oldState, dataRowKeyPtr, regionStartKey, regionEndKey);
         // Delete the entire row if any of the indexed columns changed
         DeleteType deleteType = null;
         if (oldState == null || (deleteType=getDeleteTypeOrNull(pendingUpdates)) != null || hasIndexedColumnChanged(oldState, pendingUpdates)) { // Deleting the entire row
@@ -1416,14 +1438,6 @@ public class IndexMaintainer implements Writable, Iterable<ColumnReference> {
                 	}
                     return null;
                 }
-                @Override
-                public Void visit(ArrayColumnExpression expression) {
-					KeyValueColumnExpression colExpression = expression.getArrayExpression();
-					if (indexedColumns.add(new ColumnReference(colExpression.getColumnFamily(), colExpression.getColumnQualifier()))) {
-                		indexedColumnTypes.add(colExpression.getDataType());
-                	}
-					return null;
-                }
             };
             expression.accept(visitor);
         }
@@ -1695,5 +1709,15 @@ public class IndexMaintainer implements Writable, Iterable<ColumnReference> {
     
     public Set<Pair<String, String>> getIndexedColumnInfo() {
         return indexedColumnsInfo;
+    }
+    
+    public StorageScheme getIndexStorageScheme() {
+        if (storeColsInSingleCell) {
+            return StorageScheme.COLUMNS_STORED_IN_SINGLE_CELL;
+        }
+        if (usesEncodedColumnNames) {
+            return StorageScheme.ENCODED_COLUMN_NAMES;
+        }
+        return StorageScheme.NON_ENCODED_COLUMN_NAMES;
     }
 }

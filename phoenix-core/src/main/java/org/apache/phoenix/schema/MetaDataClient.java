@@ -151,7 +151,6 @@ import org.apache.phoenix.execute.MutationState;
 import org.apache.phoenix.expression.Determinism;
 import org.apache.phoenix.expression.Expression;
 import org.apache.phoenix.expression.RowKeyColumnExpression;
-import org.apache.phoenix.hbase.index.covered.update.ColumnReference;
 import org.apache.phoenix.index.IndexMaintainer;
 import org.apache.phoenix.jdbc.PhoenixConnection;
 import org.apache.phoenix.jdbc.PhoenixDatabaseMetaData;
@@ -221,6 +220,7 @@ import org.apache.tephra.TxConstants;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.google.common.base.Strings;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.ListMultimap;
 import com.google.common.collect.Lists;
@@ -292,7 +292,7 @@ public class MetaDataClient {
                     PARENT_TENANT_ID + " " + PVarchar.INSTANCE.getSqlTypeName() + // Dynamic column for now to prevent schema change
                     ") VALUES (?, ?, ?, ?, ?, ?)";
     
-    private static final String UPDATE_ENCODED_COLUMN_COUNTER = 
+    public static final String UPDATE_ENCODED_COLUMN_COUNTER = 
             "UPSERT INTO " + SYSTEM_CATALOG_SCHEMA + ".\"" + SYSTEM_CATALOG_TABLE + "\"( " +
             TENANT_ID + ", " + 
             TABLE_SCHEM + "," +
@@ -301,7 +301,7 @@ public class MetaDataClient {
             COLUMN_QUALIFIER_COUNTER + 
             ") VALUES (?, ?, ?, ?, ?)";
 
-    private static final String INCREMENT_SEQ_NUM =
+    public static final String INCREMENT_SEQ_NUM =
             "UPSERT INTO " + SYSTEM_CATALOG_SCHEMA + ".\"" + SYSTEM_CATALOG_TABLE + "\"( " +
                     TENANT_ID + "," +
                     TABLE_SCHEM + "," +
@@ -2045,8 +2045,6 @@ public class MetaDataClient {
                  * in the client cache. If the phoenix table already doesn't exist then the non-encoded column qualifier scheme works
                  * because we cannot control the column qualifiers that were used when populating the hbase table.
                  */
-                //TODO: samarth these checks for whether table exists need to be changed for local indexes. Hate having all of these special cases for local indexes.
-                // It is making the code unmaintainable. For local indexes, the physical table already exists.
                 byte[] tableNameBytes = SchemaUtil.getTableNameAsBytes(schemaName, tableName);
                 boolean tableExists = true;
                 try (HBaseAdmin admin = connection.getQueryServices().getAdmin()) {
@@ -2058,7 +2056,7 @@ public class MetaDataClient {
                 } catch (IOException e) {
                     throw new RuntimeException(e);
                 } catch (UnsupportedOperationException e) {
-                    //FIXME: samarth I am not sure about this.
+                    // thrown by ConnectionLessQueryServicesImpl
                 }
                 if (parent != null) {
                     storageScheme = parent.getStorageScheme();
@@ -2095,12 +2093,21 @@ public class MetaDataClient {
                 }
                 ColumnName columnDefName = colDef.getColumnDefName();
                 String colDefFamily = columnDefName.getFamilyName();
-                boolean isPkColumn = isPkColumn(pkConstraint, colDef, columnDefName); 
-                String familyName = isPkColumn ? null : (colDefFamily != null ? colDefFamily : (defaultFamilyName != null ? defaultFamilyName : DEFAULT_COLUMN_FAMILY));
-                Integer encodedCQ =  isPkColumn ? null : cqCounter.getValue(familyName);   
+                boolean isPkColumn = isPkColumn(pkConstraint, colDef, columnDefName);
+                String cqCounterFamily = null;
+                if (!isPkColumn) {
+                    if (storageScheme == StorageScheme.COLUMNS_STORED_IN_SINGLE_CELL) {
+                        // For this scheme we track column qualifier counters at the column family level.
+                        cqCounterFamily = colDefFamily != null ? colDefFamily : (defaultFamilyName != null ? defaultFamilyName : DEFAULT_COLUMN_FAMILY);
+                    } else {
+                        // For other schemes, column qualifier counters are tracked using the default column family.
+                        cqCounterFamily = defaultFamilyName != null ? defaultFamilyName : DEFAULT_COLUMN_FAMILY;
+                    }
+                }
+                Integer encodedCQ =  isPkColumn ? null : cqCounter.getValue(cqCounterFamily);   
                 PColumn column = newColumn(position++, colDef, pkConstraint, defaultFamilyName, false, encodedCQ);
-                if (cqCounter.increment(familyName)) {
-                    changedCqCounters.put(familyName, cqCounter.getValue(familyName));
+                if (cqCounter.increment(cqCounterFamily)) {
+                    changedCqCounters.put(cqCounterFamily, cqCounter.getValue(cqCounterFamily));
                 }
                 if (SchemaUtil.isPKColumn(column)) {
                     // TODO: remove this constraint?
@@ -2137,36 +2144,7 @@ public class MetaDataClient {
                 }
             }
             
-            if (EncodedColumnsUtil.usesEncodedColumnNames(storageScheme)) {
-                // Store the encoded column counter for phoenix entities that have their own hbase
-                // tables i.e. base tables and indexes.
-                String schemaNameToUse = tableType == VIEW ? viewPhysicalTable.getSchemaName().getString() : schemaName;
-                String tableNameToUse = tableType == VIEW ? viewPhysicalTable.getTableName().getString() : tableName;
-                boolean sharedIndex = tableType == PTableType.INDEX && (indexType == IndexType.LOCAL || parent.getType() == PTableType.VIEW);
-                // For local indexes and indexes on views, pass on the the tenant id since all their meta-data rows have
-                // tenant ids in there.
-                String tenantIdToUse = connection.getTenantId() != null && sharedIndex ? connection.getTenantId().getString() : null;
-                // When a view adds its own columns, then we need to increase the sequence number of the base table
-                // too since we want clients to get the latest PTable of the base table.
-                for (Entry<String, Integer> entry : changedCqCounters.entrySet()) {
-                    try (PreparedStatement linkStatement = connection.prepareStatement(UPDATE_ENCODED_COLUMN_COUNTER)) {
-                        linkStatement.setString(1, tenantIdToUse);
-                        linkStatement.setString(2, schemaNameToUse);
-                        linkStatement.setString(3, tableNameToUse);
-                        linkStatement.setString(4, entry.getKey());
-                        linkStatement.setInt(5, entry.getValue());
-                        linkStatement.execute();
-                    }
-                }
-                if (tableType == VIEW && !changedCqCounters.isEmpty()) { //TODO: samarth think about shared indexes
-                    PreparedStatement incrementStatement = connection.prepareStatement(INCREMENT_SEQ_NUM);
-                    incrementStatement.setString(1, null);
-                    incrementStatement.setString(2, viewPhysicalTable.getSchemaName().getString());
-                    incrementStatement.setString(3, viewPhysicalTable.getTableName().getString());
-                    incrementStatement.setLong(4, viewPhysicalTable.getSequenceNumber() + 1);
-                    incrementStatement.execute();
-                }
-            }
+            
             
             // We need a PK definition for a TABLE or mapped VIEW
             if (!isPK && pkColumnsNames.isEmpty() && tableType != PTableType.VIEW && viewType != ViewType.MAPPED) {
@@ -2258,6 +2236,42 @@ public class MetaDataClient {
                                 PNameFactory.newName(defaultFamilyName), null,
                         Boolean.TRUE.equals(disableWAL), false, false, null, null, indexType, true, false, 0, 0L, isNamespaceMapped, autoPartitionSeq, isAppendOnlySchema, StorageScheme.NON_ENCODED_COLUMN_NAMES, PTable.EncodedCQCounter.NULL_COUNTER);
                 connection.addTable(table, MetaDataProtocol.MIN_TABLE_TIMESTAMP);
+            }
+            
+            // Update column qualifier counters
+            if (EncodedColumnsUtil.usesEncodedColumnNames(storageScheme)) {
+                // Store the encoded column counter for phoenix entities that have their own hbase
+                // tables i.e. base tables and indexes.
+                String schemaNameToUse = tableType == VIEW ? viewPhysicalTable.getSchemaName().getString() : schemaName;
+                String tableNameToUse = tableType == VIEW ? viewPhysicalTable.getTableName().getString() : tableName;
+                boolean sharedIndex = tableType == PTableType.INDEX && (indexType == IndexType.LOCAL || parent.getType() == PTableType.VIEW);
+                // For local indexes and indexes on views, pass on the the tenant id since all their meta-data rows have
+                // tenant ids in there.
+                String tenantIdToUse = connection.getTenantId() != null && sharedIndex ? connection.getTenantId().getString() : null;
+                // When a view adds its own columns, then we need to increase the sequence number of the base table
+                // too since we want clients to get the latest PTable of the base table.
+                for (Entry<String, Integer> entry : changedCqCounters.entrySet()) {
+                    try (PreparedStatement linkStatement = connection.prepareStatement(UPDATE_ENCODED_COLUMN_COUNTER)) {
+                        linkStatement.setString(1, tenantIdToUse);
+                        linkStatement.setString(2, schemaNameToUse);
+                        linkStatement.setString(3, tableNameToUse);
+                        linkStatement.setString(4, entry.getKey());
+                        linkStatement.setInt(5, entry.getValue());
+                        linkStatement.execute();
+                    }
+                }
+                if (tableType == VIEW && !changedCqCounters.isEmpty()) { //TODO: samarth think about shared indexes
+                    PreparedStatement incrementStatement = connection.prepareStatement(INCREMENT_SEQ_NUM);
+                    incrementStatement.setString(1, null);
+                    incrementStatement.setString(2, viewPhysicalTable.getSchemaName().getString());
+                    incrementStatement.setString(3, viewPhysicalTable.getTableName().getString());
+                    incrementStatement.setLong(4, viewPhysicalTable.getSequenceNumber() + 1);
+                    incrementStatement.execute();
+                }
+                if (connection.getMutationState().toMutations(timestamp).hasNext()) {
+                    tableMetaData.addAll(connection.getMutationState().toMutations(timestamp).next().getSecond());
+                    connection.rollback();
+                }
             }
 
             short nextKeySeq = 0;
@@ -2390,7 +2404,7 @@ public class MetaDataClient {
              * 3) parent table header row
              */
             Collections.reverse(tableMetaData);
-
+            
 			if (indexType != IndexType.LOCAL) {
                 splits = SchemaUtil.processSplits(splits, pkColumns, saltBucketNum, connection.getQueryServices().getProps().getBoolean(
                         QueryServices.FORCE_ROW_KEY_ORDER_ATTRIB, QueryServicesOptions.DEFAULT_FORCE_ROW_KEY_ORDER));
@@ -2488,10 +2502,6 @@ public class MetaDataClient {
         return colDef.isPK() || (pkConstraint != null && pkConstraint.getColumnWithSortOrder(columnDefName) != null);
     }
     
-    private static boolean incrementEncodedCQCounter(StorageScheme storageScheme, ColumnDef colDef) {
-        return storageScheme != StorageScheme.NON_ENCODED_COLUMN_NAMES && !colDef.isPK();
-    }
-
     /**
      * A table can be a parent table to tenant-specific tables if all of the following conditions are true:
      * <p>
@@ -3082,12 +3092,22 @@ public class MetaDataClient {
                             if (!colDef.isPK()) {
                                 String colDefFamily = colDef.getColumnDefName().getFamilyName();
                                 //FIXME: samarth Think about local indexes. They have a different column family
-                                String familyName = (colDefFamily != null ? colDefFamily : (tableForCQCounters
-                                        .getDefaultFamilyName() != null ? tableForCQCounters.getDefaultFamilyName()
-                                        .getString() : DEFAULT_COLUMN_FAMILY));
-                                encodedCQ = cqCounterToUse.getValue(familyName);   
+                                String familyName = null;
+                                StorageScheme storageScheme = table.getStorageScheme();
+                                String defaultColumnFamily = tableForCQCounters.getDefaultFamilyName() != null && !Strings.isNullOrEmpty(tableForCQCounters.getDefaultFamilyName().getString()) ? 
+                                        tableForCQCounters.getDefaultFamilyName().getString() : DEFAULT_COLUMN_FAMILY;
+                                    if (table.getType() == PTableType.INDEX && table.getIndexType() == IndexType.LOCAL) {
+                                        defaultColumnFamily = QueryConstants.LOCAL_INDEX_COLUMN_FAMILY_PREFIX + defaultColumnFamily;
+                                    }
+                                if (storageScheme == StorageScheme.COLUMNS_STORED_IN_SINGLE_CELL) {
+                                    familyName = colDefFamily != null ? colDefFamily : defaultColumnFamily;
+                                } else {
+                                    familyName = defaultColumnFamily;
+                                }
+                                encodedCQ = cqCounterToUse.getValue(familyName);
                                 if (cqCounterToUse.increment(familyName)) {
-                                    changedCqCounters.put(familyName, cqCounterToUse.getValue(familyName));
+                                    changedCqCounters.put(familyName,
+                                        cqCounterToUse.getValue(familyName));
                                 }
                             }
                             PColumn column = newColumn(position++, colDef, PrimaryKeyConstraint.EMPTY, table.getDefaultFamilyName() == null ? null : table.getDefaultFamilyName().getString(), true, encodedCQ);
@@ -3178,13 +3198,9 @@ public class MetaDataClient {
                 tableMetaData.addAll(columnMetaData);
                 boolean sharedIndex = tableType == PTableType.INDEX && (table.getIndexType() == IndexType.LOCAL || table.getViewIndexId() != null);
                 String tenantIdToUse = connection.getTenantId() != null && sharedIndex ? connection.getTenantId().getString() : null;
-                //TODO: samarth I am not sure this is going to work on server side. But for now lets add these mutations here.
                 if (!changedCqCounters.isEmpty()) {
                     PreparedStatement linkStatement;
-                    //TODO: samarth i don't think we need the shared index check here.
-                    //if (!sharedIndex) {
                         linkStatement = connection.prepareStatement(UPDATE_ENCODED_COLUMN_COUNTER);
-                        
                         for (Entry<String, Integer> entry : changedCqCounters.entrySet()) {    
                             linkStatement.setString(1, tenantIdToUse);
                             linkStatement.setString(2, tableForCQCounters.getSchemaName().getString());
@@ -3194,7 +3210,6 @@ public class MetaDataClient {
                             linkStatement.execute();
                         }
 
-                    //}
                     // When a view adds its own columns, then we need to increase the sequence number of the base table
                     // too since we want clients to get the latest PTable of the base table.
                     if (tableType == VIEW) {

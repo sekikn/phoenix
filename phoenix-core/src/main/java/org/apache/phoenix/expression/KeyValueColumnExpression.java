@@ -122,7 +122,7 @@ public class KeyValueColumnExpression extends ColumnExpression {
     }
 
     @Override
-    public final <T> T accept(ExpressionVisitor<T> visitor) {
+    public <T> T accept(ExpressionVisitor<T> visitor) {
         return visitor.visit(this);
     }
 }

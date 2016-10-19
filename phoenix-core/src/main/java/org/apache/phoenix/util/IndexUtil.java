@@ -89,7 +89,9 @@ import org.apache.phoenix.schema.PTableType;
 import org.apache.phoenix.schema.SortOrder;
 import org.apache.phoenix.schema.TableNotFoundException;
 import org.apache.phoenix.schema.TableRef;
+import org.apache.phoenix.schema.PTable.StorageScheme;
 import org.apache.phoenix.schema.ValueSchema.Field;
+import org.apache.phoenix.schema.tuple.PositionBasedResultTuple;
 import org.apache.phoenix.schema.tuple.ResultTuple;
 import org.apache.phoenix.schema.tuple.Tuple;
 import org.apache.phoenix.schema.types.PBinary;
@@ -282,8 +284,6 @@ public class IndexUtil {
                  * updating an existing row.
                  */
                 if (dataMutation instanceof Put) {
-                    // TODO: is this more efficient than looking in our mutation map
-                    // using the key plus finding the PColumn?
                     ValueGetter valueGetter = new ValueGetter() {
                     	
                     	@Override
@@ -300,19 +300,18 @@ public class IndexUtil {
                             }
                             byte[] family = ref.getFamily();
                             byte[] qualifier = ref.getQualifier();
-                            RowMutationState rowMutationState = valuesMap.get(ptr);
-                            PColumn column = null;
-                            try {
-                                column = table.getColumnFamily(family).getPColumnForColumnQualifier(qualifier);
-                            } catch (ColumnNotFoundException e) {
-                            } catch (ColumnFamilyNotFoundException e) {
+                            Map<byte [], List<Cell>> familyMap = dataMutation.getFamilyCellMap();
+                            List<Cell> kvs = familyMap.get(family);
+                            if (kvs == null) {
+                                return null;
                             }
-                            if (rowMutationState!=null && column!=null) {
-                                byte[] value = rowMutationState.getColumnValues().get(column);
-                                ImmutableBytesPtr ptr = new ImmutableBytesPtr();
-                                ptr.set(value==null ? ByteUtil.EMPTY_BYTE_ARRAY : value);
-                                SchemaUtil.padData(table.getName().getString(), column, ptr);
-                                return ptr;
+                            for (Cell kv : kvs) {
+                                if (Bytes.compareTo(kv.getFamilyArray(), kv.getFamilyOffset(), kv.getFamilyLength(), family, 0, family.length) == 0 &&
+                                    Bytes.compareTo(kv.getQualifierArray(), kv.getQualifierOffset(), kv.getQualifierLength(), qualifier, 0, qualifier.length) == 0) {
+                                  ImmutableBytesPtr ptr = new ImmutableBytesPtr();
+                                  kvBuilder.getValueAsPtr(kv, ptr);
+                                  return ptr;
+                                }
                             }
                             return null;
                         }
@@ -325,7 +324,7 @@ public class IndexUtil {
                         regionStartKey = tableRegionLocation.getRegionInfo().getStartKey();
                         regionEndkey = tableRegionLocation.getRegionInfo().getEndKey();
                     }
-                    indexMutations.add(maintainer.buildUpdateMutation(kvBuilder, valueGetter, ptr, ts, regionStartKey, regionEndkey, true));
+                    indexMutations.add(maintainer.buildUpdateMutation(kvBuilder, valueGetter, ptr, ts, regionStartKey, regionEndkey));
                 }
             }
             return indexMutations;
@@ -499,8 +498,13 @@ public class IndexUtil {
             ptr.set(indexRowKey, firstCell.getRowOffset() + offset, firstCell.getRowLength() - offset);
             byte[] dataRowKey = indexMaintainer.buildDataRowKey(ptr, viewConstants);
             Get get = new Get(dataRowKey);
+            boolean colsStoredInSingleCell = indexMaintainer.getIndexStorageScheme() == StorageScheme.COLUMNS_STORED_IN_SINGLE_CELL;
             for (int i = 0; i < dataColumns.length; i++) {
-                get.addColumn(dataColumns[i].getFamily(), dataColumns[i].getQualifier());
+                if (colsStoredInSingleCell) {
+                    get.addFamily(dataColumns[i].getFamily());
+                } else {
+                    get.addColumn(dataColumns[i].getFamily(), dataColumns[i].getQualifier());
+                }
             }
             Result joinResult = null;
             if (dataRegion != null) {
@@ -517,9 +521,9 @@ public class IndexUtil {
                     if (table != null) table.close();
                 }
             }
-            
+            // at this point join result has data from the data table. We now need to take this result and
+            // add it to the cells that we are returning. 
             // TODO: handle null case (but shouldn't happen)
-            //TODO: samarth confirm if this is the right thing to do here i.e. pass false for look up.
             Tuple joinTuple = new ResultTuple(joinResult);
             // This will create a byte[] that captures all of the values from the data table
             byte[] value =
@@ -530,131 +534,131 @@ public class IndexUtil {
                         VALUE_COLUMN_QUALIFIER, firstCell.getTimestamp(), value, 0, value.length);
             result.add(keyValue);
         }
+        
+        //FIXME: samarth switch this to using a list iterator since result.get(i) is inefficient for our PositionBasedList
         for (int i = 0; i < result.size(); i++) {
             final Cell cell = result.get(i);
-            if (cell != null) {
-                // TODO: Create DelegateCell class instead
-                Cell newCell = new Cell() {
+            // TODO: Create DelegateCell class instead
+            Cell newCell = new Cell() {
 
-                    @Override
-                    public byte[] getRowArray() {
-                        return cell.getRowArray();
-                    }
+                @Override
+                public byte[] getRowArray() {
+                    return cell.getRowArray();
+                }
 
-                    @Override
-                    public int getRowOffset() {
-                        return cell.getRowOffset() + offset;
-                    }
+                @Override
+                public int getRowOffset() {
+                    return cell.getRowOffset() + offset;
+                }
 
-                    @Override
-                    public short getRowLength() {
-                        return (short)(cell.getRowLength() - offset);
-                    }
+                @Override
+                public short getRowLength() {
+                    return (short)(cell.getRowLength() - offset);
+                }
 
-                    @Override
-                    public byte[] getFamilyArray() {
-                        return cell.getFamilyArray();
-                    }
+                @Override
+                public byte[] getFamilyArray() {
+                    return cell.getFamilyArray();
+                }
 
-                    @Override
-                    public int getFamilyOffset() {
-                        return cell.getFamilyOffset();
-                    }
+                @Override
+                public int getFamilyOffset() {
+                    return cell.getFamilyOffset();
+                }
 
-                    @Override
-                    public byte getFamilyLength() {
-                        return cell.getFamilyLength();
-                    }
+                @Override
+                public byte getFamilyLength() {
+                    return cell.getFamilyLength();
+                }
 
-                    @Override
-                    public byte[] getQualifierArray() {
-                        return cell.getQualifierArray();
-                    }
+                @Override
+                public byte[] getQualifierArray() {
+                    return cell.getQualifierArray();
+                }
 
-                    @Override
-                    public int getQualifierOffset() {
-                        return cell.getQualifierOffset();
-                    }
+                @Override
+                public int getQualifierOffset() {
+                    return cell.getQualifierOffset();
+                }
 
-                    @Override
-                    public int getQualifierLength() {
-                        return cell.getQualifierLength();
-                    }
+                @Override
+                public int getQualifierLength() {
+                    return cell.getQualifierLength();
+                }
 
-                    @Override
-                    public long getTimestamp() {
-                        return cell.getTimestamp();
-                    }
+                @Override
+                public long getTimestamp() {
+                    return cell.getTimestamp();
+                }
 
-                    @Override
-                    public byte getTypeByte() {
-                        return cell.getTypeByte();
-                    }
+                @Override
+                public byte getTypeByte() {
+                    return cell.getTypeByte();
+                }
 
-                    @Override
-                    public long getMvccVersion() {
-                        return cell.getMvccVersion();
-                    }
+                @Override
+                public long getMvccVersion() {
+                    return cell.getMvccVersion();
+                }
 
-                    @Override
-                    public byte[] getValueArray() {
-                        return cell.getValueArray();
-                    }
+                @Override
+                public byte[] getValueArray() {
+                    return cell.getValueArray();
+                }
 
-                    @Override
-                    public int getValueOffset() {
-                        return cell.getValueOffset();
-                    }
+                @Override
+                public int getValueOffset() {
+                    return cell.getValueOffset();
+                }
 
-                    @Override
-                    public int getValueLength() {
-                        return cell.getValueLength();
-                    }
+                @Override
+                public int getValueLength() {
+                    return cell.getValueLength();
+                }
 
-                    @Override
-                    public byte[] getTagsArray() {
-                        return cell.getTagsArray();
-                    }
+                @Override
+                public byte[] getTagsArray() {
+                    return cell.getTagsArray();
+                }
 
-                    @Override
-                    public int getTagsOffset() {
-                        return cell.getTagsOffset();
-                    }
+                @Override
+                public int getTagsOffset() {
+                    return cell.getTagsOffset();
+                }
 
-                    @Override
-                    public short getTagsLength() {
-                        return cell.getTagsLength();
-                    }
+                @Override
+                public short getTagsLength() {
+                    return cell.getTagsLength();
+                }
 
-                    @Override
-                    public byte[] getValue() {
-                        return cell.getValue();
-                    }
+                @Override
+                public byte[] getValue() {
+                    return cell.getValue();
+                }
 
-                    @Override
-                    public byte[] getFamily() {
-                        return cell.getFamily();
-                    }
+                @Override
+                public byte[] getFamily() {
+                    return cell.getFamily();
+                }
 
-                    @Override
-                    public byte[] getQualifier() {
-                        return cell.getQualifier();
-                    }
+                @Override
+                public byte[] getQualifier() {
+                    return cell.getQualifier();
+                }
 
-                    @Override
-                    public byte[] getRow() {
-                        return cell.getRow();
-                    }
+                @Override
+                public byte[] getRow() {
+                    return cell.getRow();
+                }
 
-                    @Override
-                    @Deprecated
-                    public int getTagsLengthUnsigned() {
-                        return cell.getTagsLengthUnsigned();
-                    }
-                };
-                // Wrap cell in cell that offsets row key
-                result.set(i, newCell);
-            }
+                @Override
+                @Deprecated
+                public int getTagsLengthUnsigned() {
+                    return cell.getTagsLengthUnsigned();
+                }
+            };
+            // Wrap cell in cell that offsets row key
+            result.set(i, newCell);
         }
     }
     

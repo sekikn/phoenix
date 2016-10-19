@@ -400,7 +400,7 @@ public class ExpressionCompiler extends UnsupportedAllParseNodeVisitor<Expressio
     }
 
     protected void addColumn(PColumn column) {
-        context.getScan().addColumn(column.getFamilyName().getBytes(), column.getName().getBytes());
+        EncodedColumnsUtil.setColumns(column, context.getCurrentTable().getTable(), context.getScan());
     }
 
     @Override
@@ -417,7 +417,7 @@ public class ExpressionCompiler extends UnsupportedAllParseNodeVisitor<Expressio
             return LiteralExpression.newConstant(column.getDataType().toObject(ptr), column.getDataType());
         }
         if (tableRef.equals(context.getCurrentTable()) && !SchemaUtil.isPKColumn(column)) { // project only kv columns
-            EncodedColumnsUtil.setColumns(column, tableRef.getTable(), context.getScan());
+            addColumn(column);
         }
         Expression expression = ref.newColumnExpression(node.isTableNameCaseSensitive(), node.isCaseSensitive());
         Expression wrappedExpression = wrapGroupByExpression(expression);

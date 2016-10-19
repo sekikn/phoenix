@@ -136,7 +136,7 @@ public class GroupedAggregateRegionObserver extends BaseScannerRegionObserver {
 
         final TupleProjector p = TupleProjector.deserializeProjectorFromScan(scan);
         final HashJoinInfo j = HashJoinInfo.deserializeHashJoinFromScan(scan);
-        boolean useQualifierAsIndex = ScanUtil.useQualifierAsIndex(ScanUtil.getMinMaxQualifiersFromScan(scan), j != null);
+        boolean useQualifierAsIndex = ScanUtil.useQualifierAsIndex(ScanUtil.getMinMaxQualifiersFromScan(scan));
         if (ScanUtil.isLocalIndex(scan) || (j == null && p != null)) {
             if (dataColumns != null) {
                 tupleProjector = IndexUtil.getTupleProjector(scan, dataColumns);
@@ -161,9 +161,9 @@ public class GroupedAggregateRegionObserver extends BaseScannerRegionObserver {
         }
         if (keyOrdered) { // Optimize by taking advantage that the rows are
                           // already in the required group by key order
-            return scanOrdered(c, scan, innerScanner, expressions, aggregators, limit, j != null);
+            return scanOrdered(c, scan, innerScanner, expressions, aggregators, limit);
         } else { // Otherwse, collect them all up in an in memory map
-            return scanUnordered(c, scan, innerScanner, expressions, aggregators, limit, j != null);
+            return scanUnordered(c, scan, innerScanner, expressions, aggregators, limit);
         }
     }
 
@@ -369,7 +369,7 @@ public class GroupedAggregateRegionObserver extends BaseScannerRegionObserver {
      */
     private RegionScanner scanUnordered(ObserverContext<RegionCoprocessorEnvironment> c, Scan scan,
             final RegionScanner scanner, final List<Expression> expressions,
-            final ServerAggregators aggregators, long limit, boolean isJoin) throws IOException {
+            final ServerAggregators aggregators, long limit) throws IOException {
         if (logger.isDebugEnabled()) {
             logger.debug(LogUtil.addCustomAnnotations("Grouped aggregation over unordered rows with scan " + scan
                     + ", group by " + expressions + ", aggregators " + aggregators, ScanUtil.getCustomAnnotations(scan)));
@@ -384,7 +384,7 @@ public class GroupedAggregateRegionObserver extends BaseScannerRegionObserver {
                             (int) (Bytes.toInt(estDistValsBytes) * 1.5f));
         }
         Pair<Integer, Integer> minMaxQualifiers = getMinMaxQualifiersFromScan(scan);
-        boolean useQualifierAsIndex = ScanUtil.useQualifierAsIndex(ScanUtil.getMinMaxQualifiersFromScan(scan), isJoin);
+        boolean useQualifierAsIndex = ScanUtil.useQualifierAsIndex(ScanUtil.getMinMaxQualifiersFromScan(scan));
         final boolean spillableEnabled =
                 conf.getBoolean(GROUPBY_SPILLABLE_ATTRIB, DEFAULT_GROUPBY_SPILLABLE);
 
@@ -450,14 +450,14 @@ public class GroupedAggregateRegionObserver extends BaseScannerRegionObserver {
      */
     private RegionScanner scanOrdered(final ObserverContext<RegionCoprocessorEnvironment> c,
             final Scan scan, final RegionScanner scanner, final List<Expression> expressions,
-            final ServerAggregators aggregators, final long limit, final boolean isJoin) throws IOException {
+            final ServerAggregators aggregators, final long limit) throws IOException {
 
         if (logger.isDebugEnabled()) {
             logger.debug(LogUtil.addCustomAnnotations("Grouped aggregation over ordered rows with scan " + scan + ", group by "
                     + expressions + ", aggregators " + aggregators, ScanUtil.getCustomAnnotations(scan)));
         }
         final Pair<Integer, Integer> minMaxQualifiers = getMinMaxQualifiersFromScan(scan);
-        final boolean useQualifierAsIndex = ScanUtil.useQualifierAsIndex(minMaxQualifiers, isJoin);
+        final boolean useQualifierAsIndex = ScanUtil.useQualifierAsIndex(minMaxQualifiers);
         return new BaseRegionScanner(scanner) {
             private long rowCount = 0;
             private ImmutableBytesPtr currentKey = null;

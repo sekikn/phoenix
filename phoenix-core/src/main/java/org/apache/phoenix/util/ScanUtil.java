@@ -915,8 +915,8 @@ public class ScanUtil {
         return new Pair<>(minQ, maxQ);
     }
     
-    public static boolean useQualifierAsIndex(Pair<Integer, Integer> minMaxQualifiers, boolean isJoin) {
-        return minMaxQualifiers != null;// && isJoin;
+    public static boolean useQualifierAsIndex(Pair<Integer, Integer> minMaxQualifiers) {
+        return minMaxQualifiers != null;
     }
     
     public static boolean setMinMaxQualifiersOnScan(PTable table) {

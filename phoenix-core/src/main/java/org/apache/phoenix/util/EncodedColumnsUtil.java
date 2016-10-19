@@ -21,7 +21,9 @@ import static com.google.common.base.Preconditions.checkArgument;
 
 import org.apache.hadoop.hbase.client.Scan;
 import org.apache.hadoop.hbase.util.Pair;
+import org.apache.phoenix.hbase.index.covered.update.ColumnReference;
 import org.apache.phoenix.query.QueryConstants;
+import org.apache.phoenix.schema.ColumnRef;
 import org.apache.phoenix.schema.PColumn;
 import org.apache.phoenix.schema.PTable;
 import org.apache.phoenix.schema.PTable.StorageScheme;
@@ -53,12 +55,13 @@ public class EncodedColumnsUtil {
             // (with the qualifier name being same as the family name), just project the column family here
             // so that we can calculate estimatedByteSize correctly in ProjectionCompiler 
     		scan.addFamily(column.getFamilyName().getBytes());
+    		//scan.addColumn(column.getFamilyName().getBytes(), column.getFamilyName().getBytes());
         }
         else {
         	scan.addColumn(column.getFamilyName().getBytes(), EncodedColumnsUtil.getColumnQualifier(column, table));
         }
     }
-
+    
     public static byte[] getColumnQualifier(PColumn column, boolean encodedColumnName) {
         checkArgument(!SchemaUtil.isPKColumn(column), "No column qualifiers for PK columns");
         if (column.isDynamic()) { // Dynamic column names don't have encoded column names
@@ -90,5 +93,5 @@ public class EncodedColumnsUtil {
     public static boolean hasEncodedColumnName(PColumn column){
         return !SchemaUtil.isPKColumn(column) && !column.isDynamic() && column.getEncodedColumnQualifier() != null;
     }
-
+    
 }

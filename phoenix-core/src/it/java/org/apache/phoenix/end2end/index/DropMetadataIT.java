@@ -298,7 +298,7 @@ public class DropMetadataIT extends ParallelStatsDisabledIT {
             ResultScanner results = table.getScanner(scan);
             Result result = results.next();
             assertNotNull(result);
-            PTable viewIndexPTable = pconn.getTable(new PTableKey(pconn.getTenantId(), "VIEWINDEX2"));
+            PTable viewIndexPTable = pconn.getTable(new PTableKey(pconn.getTenantId(), viewIndex2));
             PColumn column = viewIndexPTable.getPColumnForColumnName(IndexUtil.getIndexColumnName(QueryConstants.DEFAULT_COLUMN_FAMILY, "V4"));
             byte[] cq = EncodedColumnsUtil.getColumnQualifier(column, viewIndexPTable);
             // there should be a single row belonging to VIEWINDEX2 

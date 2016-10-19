@@ -456,25 +456,25 @@ public class StatsCollectorIT extends ParallelStatsEnabledIT {
         assertTrue(rs.next());
         assertEquals("A", rs.getString(1));
         assertEquals(24, rs.getInt(2));
-        assertEquals(12144, rs.getInt(3));
+        assertEquals(12252, rs.getInt(3));
         assertEquals(11, rs.getInt(4));
 
         assertTrue(rs.next());
         assertEquals("B", rs.getString(1));
         assertEquals(20, rs.getInt(2));
-        assertEquals(5540, rs.getInt(3));
+        assertEquals(5600, rs.getInt(3));
         assertEquals(5, rs.getInt(4));
 
         assertTrue(rs.next());
         assertEquals("C", rs.getString(1));
         assertEquals(24, rs.getInt(2));
-        assertEquals(6652, rs.getInt(3));
+        assertEquals(6724, rs.getInt(3));
         assertEquals(6, rs.getInt(4));
 
         assertTrue(rs.next());
         assertEquals("D", rs.getString(1));
         assertEquals(24, rs.getInt(2));
-        assertEquals(6652, rs.getInt(3));
+        assertEquals(6724, rs.getInt(3));
         assertEquals(6, rs.getInt(4));
 
         assertFalse(rs.next());

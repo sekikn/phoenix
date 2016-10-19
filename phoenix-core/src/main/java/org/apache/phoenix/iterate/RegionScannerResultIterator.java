@@ -38,9 +38,9 @@ public class RegionScannerResultIterator extends BaseResultIterator {
     private final Pair<Integer, Integer> minMaxQualifiers;
     private final boolean useQualifierAsIndex;
     
-    public RegionScannerResultIterator(RegionScanner scanner, Pair<Integer, Integer> minMaxQualifiers, boolean isJoin) {
+    public RegionScannerResultIterator(RegionScanner scanner, Pair<Integer, Integer> minMaxQualifiers) {
         this.scanner = scanner;
-        this.useQualifierAsIndex = ScanUtil.useQualifierAsIndex(minMaxQualifiers, isJoin);
+        this.useQualifierAsIndex = ScanUtil.useQualifierAsIndex(minMaxQualifiers);
         this.minMaxQualifiers = minMaxQualifiers;
     }
     

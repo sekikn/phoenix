@@ -23,88 +23,122 @@ import java.io.IOException;
 
 import org.apache.hadoop.hbase.io.ImmutableBytesWritable;
 import org.apache.hadoop.io.WritableUtils;
+import org.apache.phoenix.compile.CreateTableCompiler.ViewWhereExpressionVisitor;
 import org.apache.phoenix.expression.visitor.ExpressionVisitor;
+import org.apache.phoenix.expression.visitor.StatelessTraverseNoExpressionVisitor;
 import org.apache.phoenix.schema.PColumn;
 import org.apache.phoenix.schema.PDatum;
+import org.apache.phoenix.schema.SortOrder;
 import org.apache.phoenix.schema.tuple.Tuple;
 import org.apache.phoenix.schema.types.PArrayDataType;
+import org.apache.phoenix.schema.types.PDataType;
+import org.apache.phoenix.schema.types.PInteger;
 import org.apache.phoenix.schema.types.PVarbinary;
-import org.apache.phoenix.schema.types.PVarchar;
-import org.apache.phoenix.util.EncodedColumnsUtil;
+import org.apache.phoenix.util.SchemaUtil;
 
 /**
  * 
  * Class to access a column that is stored in a KeyValue that contains all
- * columns for a given column family (stored in an array)
+ * columns for a given column family (stored in an array).
  *
  */
-public class ArrayColumnExpression extends ColumnExpression {
+public class ArrayColumnExpression extends KeyValueColumnExpression {
     
-    private String displayName; // client-side only
-    private int index;
-    // expression that represents the array (where all cols are stored in a single key value)
-    private KeyValueColumnExpression arrayExpression;
-    // expression that represents this column if (it were stored as a regular key value) 
-    private KeyValueColumnExpression origKVExpression;
+    private int encodedCQ;
+    private String displayName;
     
     public ArrayColumnExpression() {
     }
     
-    public ArrayColumnExpression(PDatum column, byte[] cf, int index) {
-        super(column);
-        this.index = index;
-        this.arrayExpression = new KeyValueColumnExpression(column, cf, cf);
+    public ArrayColumnExpression(PDatum column, byte[] cf, int encodedCQ) {
+        super(column, cf, cf);
+        this.encodedCQ = encodedCQ;
     }
     
     public ArrayColumnExpression(PColumn column, String displayName, boolean encodedColumnName) {
-        super(column);
-        // array indexes are 1-based TODO: samarth think about the case when the encodedcolumn qualifier is null. Probably best to add a check here for encodedcolumnname to be true
-        this.index = column.getEncodedColumnQualifier() + 1;
-        byte[] cf = column.getFamilyName().getBytes();
-        this.arrayExpression = new KeyValueColumnExpression(column, cf, cf);
-        this.origKVExpression = new KeyValueColumnExpression(column, displayName, encodedColumnName);
-        this.displayName = displayName;
+        super(column, column.getFamilyName().getBytes(), column.getFamilyName().getBytes());
+        this.displayName = SchemaUtil.getColumnDisplayName(column.getFamilyName().getString(), column.getName().getString());
+        // TODO: samarth think about the case when the encodedcolumn qualifier is null. Probably best to add a check here for encodedcolumnname to be true
+        this.encodedCQ = column.getEncodedColumnQualifier();
     }
 
     @Override
     public boolean evaluate(Tuple tuple, ImmutableBytesWritable ptr) {
-        return PArrayDataType.positionAtArrayElement(tuple, ptr, index, arrayExpression, PVarbinary.INSTANCE, null);
+    	if (!super.evaluate(tuple, ptr)) {
+            return false;
+        } else if (ptr.getLength() == 0) { 
+        	return true; 
+        }
+
+        // Given a ptr to the entire array, set ptr to point to a particular element within that array
+        // given the type of an array element (see comments in PDataTypeForArray)
+    	PArrayDataType.positionAtArrayElement(ptr, encodedCQ, PVarbinary.INSTANCE, null);
+        return true;
     }
 
     @Override
-    public <T> T accept(ExpressionVisitor<T> visitor) {
-        return visitor.visit(this);
-    }
-    
-    @Override
     public void readFields(DataInput input) throws IOException {
         super.readFields(input);
-        index = WritableUtils.readVInt(input);
-        arrayExpression = new KeyValueColumnExpression();
-        arrayExpression.readFields(input);
-        origKVExpression = new KeyValueColumnExpression();
-        origKVExpression.readFields(input);
+        encodedCQ = WritableUtils.readVInt(input);
     }
 
     @Override
     public void write(DataOutput output) throws IOException {
         super.write(output);
-        WritableUtils.writeVInt(output, index);
-        arrayExpression.write(output);
-        origKVExpression.write(output);
-    }
-    
-    public KeyValueColumnExpression getArrayExpression() {
-        return arrayExpression;
+        WritableUtils.writeVInt(output, encodedCQ);
     }
     
     public KeyValueColumnExpression getKeyValueExpression() {
-        return origKVExpression;
+    	final boolean isNullable = isNullable();
+    	final SortOrder sortOrder = getSortOrder();
+    	final Integer scale = getScale();
+    	final Integer maxLength = getMaxLength();
+    	final PDataType datatype = getDataType();
+        return new KeyValueColumnExpression(new PDatum() {
+			
+			@Override
+			public boolean isNullable() {
+				return isNullable;
+			}
+			
+			@Override
+			public SortOrder getSortOrder() {
+				return sortOrder;
+			}
+			
+			@Override
+			public Integer getScale() {
+				return scale;
+			}
+			
+			@Override
+			public Integer getMaxLength() {
+				return maxLength;
+			}
+			
+			@Override
+			public PDataType getDataType() {
+				return datatype;
+			}
+		}, getColumnFamily(), PInteger.INSTANCE.toBytes(encodedCQ));
     }
     
     @Override
     public String toString() {
         return displayName;
     }
-
+    
+    public byte[] getEncodedColumnQualifier() {
+        return PInteger.INSTANCE.toBytes(encodedCQ);
+    }
+    
+    @Override
+    public <T> T accept(ExpressionVisitor<T> visitor) {
+        //FIXME: this is ugly but can't think of a good solution.
+        if (visitor instanceof ViewWhereExpressionVisitor) {
+            return visitor.visit(this);
+        } else {
+            return super.accept(visitor);
+        }
+    }
 }

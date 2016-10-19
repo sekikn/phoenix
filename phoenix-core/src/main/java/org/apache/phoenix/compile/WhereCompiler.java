@@ -229,21 +229,6 @@ public class WhereCompiler {
             }
         }
         
-        public void increment(ArrayColumnExpression column) {
-            switch (count) {
-                case NONE:
-                    count = Count.SINGLE;
-                    this.column = column.getArrayExpression();
-                    break;
-                case SINGLE:
-                    count = column.getArrayExpression().equals(this.column) ? Count.SINGLE : Count.MULTIPLE;
-                    break;
-                case MULTIPLE:
-                    break;
-
-            }
-        }
-        
         public Count getCount() {
             return count;
         }
@@ -275,12 +260,6 @@ public class WhereCompiler {
 
                 @Override
                 public Void visit(KeyValueColumnExpression expression) {
-                    counter.increment(expression);
-                    return null;
-                }
-                
-                @Override
-                public Void visit(ArrayColumnExpression expression) {
                     counter.increment(expression);
                     return null;
                 }

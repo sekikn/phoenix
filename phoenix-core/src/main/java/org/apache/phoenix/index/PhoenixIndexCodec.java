@@ -74,7 +74,7 @@ public class PhoenixIndexCodec extends BaseIndexCodec {
             indexUpdate.setTable(maintainer.isLocalIndex() ? state.getEnvironment().getRegion()
                     .getTableDesc().getName() : maintainer.getIndexTableName());
             Put put = maintainer.buildUpdateMutation(KV_BUILDER, valueGetter, ptr, state.getCurrentTimestamp(), env
-                    .getRegion().getRegionInfo().getStartKey(), env.getRegion().getRegionInfo().getEndKey(), false);
+                    .getRegion().getRegionInfo().getStartKey(), env.getRegion().getRegionInfo().getEndKey());
             indexUpdate.setUpdate(put);
             indexUpdates.add(indexUpdate);
         }

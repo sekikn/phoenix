@@ -35,14 +35,14 @@ public class PositionBasedMultiKeyValueTuple extends BaseTuple {
     public PositionBasedMultiKeyValueTuple() {}
     
     public PositionBasedMultiKeyValueTuple(List<Cell> values) {
-        checkArgument(values instanceof EncodedColumnQualiferCellsList, "PositionBasedMultiKeyValueTuple only works with lists of type BoundedSkipNullCellsList");
+        checkArgument(values instanceof EncodedColumnQualiferCellsList, "PositionBasedMultiKeyValueTuple only works with lists of type EncodedColumnQualiferCellsList");
         this.values = (EncodedColumnQualiferCellsList)values;
     }
     
     /** Caller must not modify the list that is passed here */
     @Override
     public void setKeyValues(List<Cell> values) {
-        checkArgument(values instanceof EncodedColumnQualiferCellsList, "PositionBasedMultiKeyValueTuple only works with lists of type BoundedSkipNullCellsList");
+        checkArgument(values instanceof EncodedColumnQualiferCellsList, "PositionBasedMultiKeyValueTuple only works with lists of type EncodedColumnQualiferCellsList");
         this.values = (EncodedColumnQualiferCellsList)values;
     }
 

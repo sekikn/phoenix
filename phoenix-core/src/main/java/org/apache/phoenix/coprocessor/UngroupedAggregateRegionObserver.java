@@ -323,7 +323,7 @@ public class UngroupedAggregateRegionObserver extends BaseScannerRegionObserver 
         ColumnReference[] dataColumns = IndexUtil.deserializeDataTableColumnsToJoin(scan);
         final TupleProjector p = TupleProjector.deserializeProjectorFromScan(scan);
         final HashJoinInfo j = HashJoinInfo.deserializeHashJoinFromScan(scan);
-        boolean useQualifierAsIndex = ScanUtil.useQualifierAsIndex(ScanUtil.getMinMaxQualifiersFromScan(scan), j != null) && scan.getAttribute(BaseScannerRegionObserver.TOPN) != null;
+        boolean useQualifierAsIndex = ScanUtil.useQualifierAsIndex(ScanUtil.getMinMaxQualifiersFromScan(scan)) && scan.getAttribute(BaseScannerRegionObserver.TOPN) != null;
         if ((localIndexScan && !isDelete && !isDescRowKeyOrderUpgrade) || (j == null && p != null)) {
             if (dataColumns != null) {
                 tupleProjector = IndexUtil.getTupleProjector(scan, dataColumns);
@@ -498,7 +498,7 @@ public class UngroupedAggregateRegionObserver extends BaseScannerRegionObserver 
                                         Put put = maintainer.buildUpdateMutation(kvBuilder,
                                             valueGetter, ptr, results.get(0).getTimestamp(),
                                             env.getRegion().getRegionInfo().getStartKey(),
-                                            env.getRegion().getRegionInfo().getEndKey(), false);
+                                            env.getRegion().getRegionInfo().getEndKey());
                                         indexMutations.add(put);
                                     }
                                 }

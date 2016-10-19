@@ -79,7 +79,7 @@ public class EncodedColumnQualiferCellsList implements List<Cell> {
     public int size() {
         return numNonNullElements;
     }
-
+    
     @Override
     public boolean isEmpty() {
         return numNonNullElements == 0;
@@ -132,8 +132,10 @@ public class EncodedColumnQualiferCellsList implements List<Cell> {
         int columnQualifier = PInteger.INSTANCE.getCodec().decodeInt(e.getQualifierArray(), e.getQualifierOffset(), SortOrder.ASC);
         checkQualifierRange(columnQualifier);
         int idx = getArrayIndex(columnQualifier);
+        if (array[idx] == null) {
+            numNonNullElements++;
+        }
         array[idx] = e;
-        numNonNullElements++;
         if (firstNonNullElementIdx == -1) {
             firstNonNullElementIdx = idx;
         }
@@ -228,30 +230,31 @@ public class EncodedColumnQualiferCellsList implements List<Cell> {
     public Cell get(int index) {
         rangeCheck(index);
         int numNonNullElementsFound = 0;
-        int i = 0;
-        for (; i < array.length; i++) {
+        for (int i = 0; i < array.length; i++) {
             if (array[i] != null) {
                 numNonNullElementsFound++;
-                if (numNonNullElementsFound - 1 == index) {
-                    break;
+                if (numNonNullElementsFound == index + 1) {
+                    return array[i];
                 }
             }
-            
         }
-        return (numNonNullElementsFound - 1) != index ? null : array[i];
+        throw new IllegalStateException("There was no element present in the list at index " + index + " even though number of elements in the list are " + size());
     }
 
     @Override
     public Cell set(int index, Cell e) {
+        // index is ignored since every column qualifier has a specific place in this list which is not dictated by index.
         int columnQualifier = PInteger.INSTANCE.getCodec().decodeInt(e.getQualifierArray(), e.getQualifierOffset(), SortOrder.ASC);
         checkQualifierRange(columnQualifier);
         int idx = getArrayIndex(columnQualifier);
-        if (idx != index) {
-            throw new IllegalArgumentException("Attempt made to add cell with encoded column qualifier " + columnQualifier +  "  to the encodedcolumnqualifier list at index " + index);
-        }
+//        if (idx != index) {
+//            throw new IllegalArgumentException("Attempt made to add cell with encoded column qualifier " + columnQualifier +  "  at index " + index);
+//        }
         Cell prev = array[idx];
         array[idx] = e;
-        numNonNullElements++;
+        if (prev == null) {
+            numNonNullElements++;
+        }
         if (firstNonNullElementIdx == -1) {
             firstNonNullElementIdx = idx;
         }
@@ -367,28 +370,31 @@ public class EncodedColumnQualiferCellsList implements List<Cell> {
     private class Itr implements Iterator<Cell> {
         private Cell current;
         private int currentIdx = 0;
-        private boolean exhausted = false;
+        private int modCount = 0;
+        private int expectedModCount = 0;
         private Itr() {
             moveToNextNonNullCell(true);
         }
 
         @Override
         public boolean hasNext() {
-            return !exhausted;
+            return current != null;
         }
 
         @Override
         public Cell next() {
-            if (exhausted) {
-                return null;
+            if (!hasNext()) {
+                throw new NoSuchElementException();
             }
             Cell next = current;
             moveToNextNonNullCell(false);
+            modCount++;
             return next;
         }
 
         @Override
         public void remove() {
+            
             throwUnsupportedOperationException();            
         }
 
@@ -399,9 +405,10 @@ public class EncodedColumnQualiferCellsList implements List<Cell> {
             }
             if (i < array.length) {
                 currentIdx = i;
+                current = array[currentIdx];
             } else {
                 currentIdx = -1;
-                exhausted = true;
+                current = null;
             }
         }
 
@@ -412,6 +419,7 @@ public class EncodedColumnQualiferCellsList implements List<Cell> {
         private int nextIndex;
         private Cell previous;
         private Cell next;
+        private int currentIndex = -1;
         
         private ListItr() {
             movePointersForward(true);
@@ -447,7 +455,7 @@ public class EncodedColumnQualiferCellsList implements List<Cell> {
             if (toReturn == null) {
                 throw new NoSuchElementException();
             }
-            movePointersBackward(false);
+            movePointersBackward();
             return toReturn;
         }
 
@@ -460,11 +468,13 @@ public class EncodedColumnQualiferCellsList implements List<Cell> {
         public int previousIndex() {
             return previousIndex;
         }
-
+        
+        //TODO: samarth implement all of these operations
         @Override
         public void remove() {
-            // TODO Auto-generated method stub
-            
+            if (currentIndex == -1) {
+                //throw 
+            }
         }
         
         // TODO: samarth this is one of these ouch methods that can make our implementation frgaile.
@@ -500,10 +510,25 @@ public class EncodedColumnQualiferCellsList implements List<Cell> {
                 nextIndex = -1;
                 next = null;
             }
+            if (!init) {
+                currentIndex = nextIndex;
+            }
         }
         
-        private void movePointersBackward(boolean init) {
-            int i = init ? 0 : previousIndex;
+        private void movePointersBackward() {
+            nextIndex = previousIndex;
+            next = previous;
+            int i = previousIndex - 1;
+            for (; i >= 0; i--) {
+                if (array[i] != null) {
+                    previousIndex = i;
+                    previous = array[i];
+                }
+            }
+            if (i < 0) {
+                previous = null; 
+            }
+            currentIndex = previousIndex;
         }
         
     }

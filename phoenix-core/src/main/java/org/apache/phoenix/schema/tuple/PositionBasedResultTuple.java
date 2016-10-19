@@ -33,6 +33,7 @@ public class PositionBasedResultTuple extends BaseTuple {
     //TODO: samarth see if we can get rid of this constructor altogether.
     public PositionBasedResultTuple(List<Cell> list) {
         checkArgument(list instanceof EncodedColumnQualiferCellsList, "Invalid list type");
+        //checkArgument(list.size() > 0, "Empty list");
         this.cells = (EncodedColumnQualiferCellsList)list;
     }
     

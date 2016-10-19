@@ -247,7 +247,6 @@ public abstract class BaseResultIterators extends ExplainTable implements Result
                         new DistinctPrefixFilter(plan.getTableRef().getTable().getRowKeySchema(),
                                 cols));
             }
-            //TODO: samarth add condition to not do position based look ups in case of joins so that we won't need to do the hacky check inside co-processors.
             if (setMinMaxQualifiersOnScan(table)) {
                 Pair<Integer, Integer> minMaxQualifiers = getMinMaxQualifiers(scan, context);
                 if (minMaxQualifiers != null) {

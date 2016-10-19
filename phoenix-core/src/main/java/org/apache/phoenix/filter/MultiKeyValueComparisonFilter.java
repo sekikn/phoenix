@@ -188,11 +188,6 @@ public abstract class MultiKeyValueComparisonFilter extends BooleanExpressionFil
                 inputTuple.addColumn(expression.getColumnFamily(), expression.getColumnQualifier());
                 return null;
             }
-            @Override
-            public Void visit(ArrayColumnExpression expression) {
-                inputTuple.addColumn(expression.getArrayExpression().getColumnFamily(), expression.getArrayExpression().getColumnQualifier());
-                return null;
-            }
         };
         expression.accept(visitor);
     }
