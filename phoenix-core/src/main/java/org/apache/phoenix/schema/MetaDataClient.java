@@ -2047,17 +2047,12 @@ public class MetaDataClient {
                  */
                 byte[] tableNameBytes = SchemaUtil.getTableNameAsBytes(schemaName, tableName);
                 boolean tableExists = true;
-                try (HBaseAdmin admin = connection.getQueryServices().getAdmin()) {
-                    try {
-                        admin.getTableDescriptor(tableNameBytes);
-                    } catch (org.apache.hadoop.hbase.TableNotFoundException e) {
-                        tableExists = false;
-                    }
-                } catch (IOException e) {
-                    throw new RuntimeException(e);
-                } catch (UnsupportedOperationException e) {
-                    // thrown by ConnectionLessQueryServicesImpl
+                try {
+                    connection.getQueryServices().getTableDescriptor(tableNameBytes);
+                } catch (org.apache.phoenix.schema.TableNotFoundException e) {
+                    tableExists = false;
                 }
+
                 if (parent != null) {
                     storageScheme = parent.getStorageScheme();
                 } else if (tableExists) {
