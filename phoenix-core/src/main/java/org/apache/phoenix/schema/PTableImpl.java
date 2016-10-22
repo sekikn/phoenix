@@ -850,7 +850,7 @@ public class PTableImpl implements PTable {
                         for (PColumn column : columns) {
                             maxEncodedColumnQualifier = Math.max(maxEncodedColumnQualifier, column.getEncodedColumnQualifier());
                         }
-                        byte[][] colValues = new byte[maxEncodedColumnQualifier+1][]; //TODO: samarth probably use the min_qualifier as an offset here.
+                        byte[][] colValues = new byte[maxEncodedColumnQualifier+1][];
                         for (PColumn column : columns) {
                             colValues[column.getEncodedColumnQualifier()] = columnToValueMap.get(column);
                         }
@@ -1140,7 +1140,6 @@ public class PTableImpl implements PTable {
         return indexType;
     }
     
-    //FIXME: samarth change the proto here
     /**
      * Construct a PTable instance from ProtoBuffered PTable instance
      * @param table

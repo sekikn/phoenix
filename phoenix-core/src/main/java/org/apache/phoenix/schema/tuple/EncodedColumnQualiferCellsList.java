@@ -51,31 +51,29 @@ public class EncodedColumnQualiferCellsList implements List<Cell> {
 
     private int minQualifier;
     private int maxQualifier;
+    private int nonReservedRangeOffset;
     private final Cell[] array;
     private int numNonNullElements;
     private int firstNonNullElementIdx = -1;
-    private static final int RESERVED_RANGE_MIN = ENCODED_EMPTY_COLUMN_NAME;
-    private static final int RESERVED_RANGE_MAX = ENCODED_CQ_COUNTER_INITIAL_VALUE - 1;
-    private static final String RESERVED_RANGE = "(" + RESERVED_RANGE_MIN + ", "
-            + RESERVED_RANGE_MAX + ")";
-    
+    private static final int RESERVED_RANGE_SIZE = ENCODED_CQ_COUNTER_INITIAL_VALUE - ENCODED_EMPTY_COLUMN_NAME;
     // Used by iterators to figure out if the list was structurally modified.
     private int modCount = 0;
 
-    public EncodedColumnQualiferCellsList(int minQualifier, int maxQualifier) {
-        checkArgument(minQualifier <= maxQualifier, "Invalid arguments. Min: " + minQualifier
-                + ". Max: " + maxQualifier);
-        if (!(minQualifier == maxQualifier && minQualifier == ENCODED_EMPTY_COLUMN_NAME)) {
-            checkArgument(minQualifier >= ENCODED_CQ_COUNTER_INITIAL_VALUE,
-                "Argument minQualifier " + minQualifier
-                        + " needs to lie outside of the reserved range: " + RESERVED_RANGE);
+    public EncodedColumnQualiferCellsList(int minQ, int maxQ) {
+        checkArgument(minQ <= maxQ, "Invalid arguments. Min: " + minQ
+                + ". Max: " + maxQ);
+        this.minQualifier = minQ;
+        this.maxQualifier = maxQ;
+        int size = 0;
+        if (maxQ < ENCODED_CQ_COUNTER_INITIAL_VALUE) {
+            size = RESERVED_RANGE_SIZE;
+        } else if (minQ < ENCODED_CQ_COUNTER_INITIAL_VALUE) {
+            size = (maxQ - minQ + 1);
+        } else {
+            size = RESERVED_RANGE_SIZE + (maxQ - minQ + 1);
         }
-        this.minQualifier = minQualifier;
-        this.maxQualifier = maxQualifier;
-        int reservedRangeSize = RESERVED_RANGE_MAX - RESERVED_RANGE_MIN + 1;
-        int qualifierRangeSize =
-                minQualifier > RESERVED_RANGE_MAX ? (maxQualifier - minQualifier + 1) : 0;
-        this.array = new Cell[reservedRangeSize + qualifierRangeSize];
+        this.array = new Cell[size];
+        this.nonReservedRangeOffset = minQ > ENCODED_CQ_COUNTER_INITIAL_VALUE ? minQ  - ENCODED_CQ_COUNTER_INITIAL_VALUE : 0;
     }
 
     @Override
@@ -366,31 +364,27 @@ public class EncodedColumnQualiferCellsList implements List<Cell> {
     }
 
     private void checkQualifierRange(int qualifier) {
-        if (!(isReservedQualifier(qualifier) || isQualifierInMinMaxRange(qualifier))) {
+        if (qualifier < ENCODED_CQ_COUNTER_INITIAL_VALUE) {
+            return; // space in the array for reserved range is always allocated. 
+        }
+        if (qualifier < minQualifier || qualifier > maxQualifier) {
             throw new IndexOutOfBoundsException("Qualifier " + qualifier
-                    + " is out of the valid range. Reserved: " + RESERVED_RANGE
-                    + ". Table column qualifier range: (" + minQualifier + ", " + maxQualifier
-                    + ")");
+                    + " is out of the valid range - (" + minQualifier + ", " + maxQualifier + ")");
         }
     }
 
-    private boolean isReservedQualifier(int qualifier) {
-        return qualifier >= RESERVED_RANGE_MIN && qualifier <= RESERVED_RANGE_MAX;
-    }
-
-    private boolean isQualifierInMinMaxRange(int qualifier) {
-        return qualifier >= minQualifier && qualifier <= maxQualifier;
-    }
-
     private void rangeCheck(int index) {
-        if (index < 0 || index > size() - 1) {
+        if (index < 0 || index >= size()) {
             throw new IndexOutOfBoundsException();
         }
     }
 
     private int getArrayIndex(int columnQualifier) {
-        return columnQualifier < ENCODED_CQ_COUNTER_INITIAL_VALUE ? columnQualifier
-                : ENCODED_CQ_COUNTER_INITIAL_VALUE + (columnQualifier - minQualifier);
+        checkArgument(columnQualifier >= ENCODED_EMPTY_COLUMN_NAME);
+        if (columnQualifier < ENCODED_CQ_COUNTER_INITIAL_VALUE) {
+            return columnQualifier;
+        }
+        return columnQualifier - nonReservedRangeOffset;
     }
 
     private void throwGenericUnsupportedOperationException() {

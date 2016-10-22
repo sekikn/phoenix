@@ -61,10 +61,5 @@ public interface PColumn extends PDatum {
     
     boolean isDynamic();
     
-    /**
-     * @return name of the HBase column qualifier
-     * TODO: samarth I think we should should change this to return byte[] array.
-     * Then we won't have to worry about calling SchemaUtil... everywhere 
-     */
     Integer getEncodedColumnQualifier();
 }

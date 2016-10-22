@@ -68,7 +68,6 @@ public class KeyValueColumnExpression extends ColumnExpression {
         return cf;
     }
     
-    //TODO: samarth look for the callers of this.
     public byte[] getColumnQualifier() {
         return cq;
     }

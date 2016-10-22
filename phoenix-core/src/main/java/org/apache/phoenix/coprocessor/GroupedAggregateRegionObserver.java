@@ -518,9 +518,6 @@ public class GroupedAggregateRegionObserver extends BaseScannerRegionObserver {
                             KeyValueUtil.newKeyValue(currentKey.get(), currentKey.getOffset(),
                                 currentKey.getLength(), SINGLE_COLUMN_FAMILY, SINGLE_COLUMN,
                                 AGG_TIMESTAMP, value, 0, value.length);
-                    //TODO: samarth aaha how do we handle this. It looks like we are adding stuff like this to the results
-                    // that we are returning. Bounded skip null cell list won't handle this properly. Interesting. So how do we
-                    // handle this. Does having a reserved set of column qualifiers help here? 
                     results.add(keyValue);
                     if (logger.isDebugEnabled()) {
                         logger.debug(LogUtil.addCustomAnnotations("Adding new aggregate row: "

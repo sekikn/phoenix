@@ -25,6 +25,7 @@ import static org.junit.Assert.fail;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.ConcurrentModificationException;
 import java.util.Iterator;
 import java.util.List;
 import java.util.ListIterator;
@@ -394,6 +395,57 @@ public class EncodedColumnQualifierCellsListTest {
             fail("Adding null elements to the list is not allowed");
         } catch (NullPointerException expected) {
             
+        }
+    }
+    
+    @Test
+    public void testFailFastIterator() throws Exception {
+        EncodedColumnQualiferCellsList list = new EncodedColumnQualiferCellsList(11, 16);
+        populateList(list);
+        int i = 0;
+        Iterator<Cell> itr = list.iterator();
+        while (itr.hasNext()) {
+            i++;
+            try {
+                itr.next();
+                list.add(KeyValue.createFirstOnRow(row, cf, PInteger.INSTANCE.toBytes(0)));
+                if (i == 2) {
+                    fail("ConcurrentModificationException should have been thrown as the list is being modified while being iterated through");
+                }
+            } catch (ConcurrentModificationException expected) {
+                assertEquals("Exception should have been thrown when getting the second element",
+                    2, i);
+                break;
+            }
+        }
+    }
+    
+    @Test
+    public void testFailFastListIterator() throws Exception {
+        EncodedColumnQualiferCellsList list = new EncodedColumnQualiferCellsList(11, 16);
+        populateList(list);
+        ListIterator<Cell> itr = list.listIterator();
+        itr.next();
+        list.add(KeyValue.createFirstOnRow(row, cf, PInteger.INSTANCE.toBytes(0)));
+        try {
+            itr.next();
+            fail("ConcurrentModificationException should have been thrown as the list was modified without using iterator");
+        } catch (ConcurrentModificationException expected) {
+
+        }
+        list = new EncodedColumnQualiferCellsList(11, 16);
+        populateList(list);
+        itr = list.listIterator();
+        itr.next();
+        itr.next();
+        itr.remove();
+        itr.next();
+        list.remove(KeyValue.createFirstOnRow(row, cf, PInteger.INSTANCE.toBytes(0)));
+        try {
+            itr.next();
+            fail("ConcurrentModificationException should have been thrown as the list was modified without using iterator");
+        } catch (ConcurrentModificationException expected) {
+
         }
     }
     

@@ -428,7 +428,7 @@ public interface PTable extends PMetaDataEntity {
         public static final EncodedCQCounter NULL_COUNTER = new EncodedCQCounter() {
             
             @Override
-            public Integer getValue(String columnFamily) {
+            public Integer getNextQualifier(String columnFamily) {
                 return null;
             }
             
@@ -438,9 +438,14 @@ public interface PTable extends PMetaDataEntity {
             }
         };
         
+        /**
+         * Get the next qualifier to be used for the column family.
+         * This method also ends up initializing the counter if the
+         * column family already doesn't have one.
+         */
         @Nullable
-        public Integer getValue(String columnFamily) {
-            Integer counter =  familyCounters.get(columnFamily);
+        public Integer getNextQualifier(String columnFamily) {
+            Integer counter = familyCounters.get(columnFamily);
             if (counter == null) {
                 counter = ENCODED_CQ_COUNTER_INITIAL_VALUE;
                 familyCounters.put(columnFamily, counter);

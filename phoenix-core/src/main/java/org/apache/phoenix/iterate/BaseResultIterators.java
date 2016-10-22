@@ -18,7 +18,6 @@
 package org.apache.phoenix.iterate;
 
 import static com.google.common.base.Preconditions.checkArgument;
-import static org.apache.phoenix.coprocessor.BaseScannerRegionObserver.EXPECTED_UPPER_REGION_KEY;
 import static org.apache.phoenix.coprocessor.BaseScannerRegionObserver.SCAN_ACTUAL_START_ROW;
 import static org.apache.phoenix.coprocessor.BaseScannerRegionObserver.SCAN_START_ROW_SUFFIX;
 import static org.apache.phoenix.coprocessor.BaseScannerRegionObserver.SCAN_STOP_ROW_SUFFIX;
@@ -53,9 +52,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 import org.apache.hadoop.hbase.HConstants;
-
-import javax.management.Query;
-
 import org.apache.hadoop.hbase.HRegionInfo;
 import org.apache.hadoop.hbase.HRegionLocation;
 import org.apache.hadoop.hbase.TableName;
@@ -83,7 +79,6 @@ import org.apache.phoenix.parse.HintNode;
 import org.apache.phoenix.parse.HintNode.Hint;
 import org.apache.phoenix.query.ConnectionQueryServices;
 import org.apache.phoenix.query.KeyRange;
-import org.apache.phoenix.query.QueryConstants;
 import org.apache.phoenix.query.QueryServices;
 import org.apache.phoenix.query.QueryServicesOptions;
 import org.apache.phoenix.schema.PColumnFamily;
@@ -167,7 +162,7 @@ public abstract class BaseResultIterators extends ExplainTable implements Result
         return true;
     }
     
-    private static void initializeScan(QueryPlan plan, Integer perScanLimit, Integer offset, Scan scan) {
+    private static void initializeScan(QueryPlan plan, Integer perScanLimit, Integer offset, Scan scan) throws SQLException {
         StatementContext context = plan.getContext();
         TableRef tableRef = plan.getTableRef();
         PTable table = tableRef.getTable();
@@ -260,61 +255,65 @@ public abstract class BaseResultIterators extends ExplainTable implements Result
         }
     }
     
-    private static Pair<Integer, Integer> getMinMaxQualifiers(Scan scan, StatementContext context) {
+    private static Pair<Integer, Integer> getMinMaxQualifiers(Scan scan, StatementContext context)
+            throws SQLException {
         PTable table = context.getCurrentTable().getTable();
         StorageScheme storageScheme = table.getStorageScheme();
-		checkArgument(EncodedColumnsUtil.usesEncodedColumnNames(storageScheme), "Method should only be used for tables using encoded column names");
-        Integer minQualifier = null;
-        Integer maxQualifier = null;
-        boolean emptyKVProjected = false;
+        checkArgument(storageScheme == StorageScheme.ENCODED_COLUMN_NAMES,
+            "Method should only be used for tables using encoded column names");
+        Pair<Integer, Integer> minMaxQualifiers = new Pair<>();
         for (Pair<byte[], byte[]> whereCol : context.getWhereConditionColumns()) {
             byte[] cq = whereCol.getSecond();
             if (cq != null) {
-                int qualifier = (Integer)PInteger.INSTANCE.toObject(cq);
-                if (qualifier == ENCODED_EMPTY_COLUMN_NAME) {
-                    emptyKVProjected = true;
-                    continue;
-                }
-                if (minQualifier == null && maxQualifier == null) {
-                    minQualifier = maxQualifier = qualifier;
-                } else {
-                    if (qualifier < minQualifier) {
-                        minQualifier = qualifier;
-                    } else if (qualifier > maxQualifier) {
-                        maxQualifier = qualifier;
-                    }
-                }
+                int qualifier = (Integer) PInteger.INSTANCE.toObject(cq);
+                determineQualifierRange(qualifier, minMaxQualifiers);
             }
         }
         Map<byte[], NavigableSet<byte[]>> familyMap = scan.getFamilyMap();
+
+        Map<String, Pair<Integer, Integer>> qualifierRanges = SchemaUtil.getQualifierRanges(table);
         for (Entry<byte[], NavigableSet<byte[]>> entry : familyMap.entrySet()) {
             if (entry.getValue() != null) {
                 for (byte[] cq : entry.getValue()) {
                     if (cq != null) {
-                        int qualifier = (Integer)PInteger.INSTANCE.toObject(cq);
-                        if (qualifier == ENCODED_EMPTY_COLUMN_NAME) {
-                            emptyKVProjected = true;
-                            continue;
-                        }
-                        if (minQualifier == null && maxQualifier == null) {
-                            minQualifier = maxQualifier = qualifier;
-                        } else {
-                            if (qualifier < minQualifier) {
-                                minQualifier = qualifier;
-                            } else if (qualifier > maxQualifier) {
-                                maxQualifier = qualifier;
-                            }
-                        }
+                        int qualifier = (Integer) PInteger.INSTANCE.toObject(cq);
+                        determineQualifierRange(qualifier, minMaxQualifiers);
                     }
                 }
+            } else {
+                /*
+                 * All the columns of the column family are being projected. So we will need to
+                 * consider all the columns in the column family to determine the min-max range.
+                 */
+                String family = Bytes.toString(entry.getKey());
+                Pair<Integer, Integer> range = qualifierRanges.get(family);
+                determineQualifierRange(range.getFirst(), minMaxQualifiers);
+                determineQualifierRange(range.getSecond(), minMaxQualifiers);
             }
         }
-        if (minQualifier == null && emptyKVProjected) {
-            return new Pair<>(ENCODED_EMPTY_COLUMN_NAME, ENCODED_EMPTY_COLUMN_NAME);
-        } else if (minQualifier == null) {
+        if (minMaxQualifiers.getFirst() == null) {
             return null;
         }
-        return new Pair<>(minQualifier, maxQualifier);
+        return minMaxQualifiers;
+    }
+
+    /**
+     * 
+     * @param cq
+     * @param minMaxQualifiers
+     * @return true if the empty column was projected
+     */
+    private static void determineQualifierRange(Integer qualifier, Pair<Integer, Integer> minMaxQualifiers) {
+        if (minMaxQualifiers.getFirst() == null) {
+            minMaxQualifiers.setFirst(qualifier);
+            minMaxQualifiers.setSecond(qualifier);
+        } else {
+            if (minMaxQualifiers.getFirst() > qualifier) {
+                minMaxQualifiers.setFirst(qualifier);
+            } else if (minMaxQualifiers.getSecond() < qualifier) {
+                minMaxQualifiers.setSecond(qualifier);
+            }
+        }
     }
     
     private static void optimizeProjection(StatementContext context, Scan scan, PTable table, FilterableStatement statement) {

@@ -959,7 +959,6 @@ public class MetaDataEndpointImpl extends MetaDataProtocol implements Coprocesso
             if (results.isEmpty()) {
                 break;
             }
-            //TODO: samarth remember why we have colums present at LINK_TYPE_INDEX
             Cell colKv = results.get(LINK_TYPE_INDEX);
             if (colKv != null) {
                 int colKeyLength = colKv.getRowLength();
@@ -2027,7 +2026,7 @@ public class MetaDataEndpointImpl extends MetaDataProtocol implements Coprocesso
                     return result;
                 }
                 region.mutateRowsWithLocks(tableMetadata, Collections.<byte[]> emptySet());
-                // Invalidate from cache. //TODO: samarth should we invalidate the base table from the cache too here.
+                // Invalidate from cache.
                 for (ImmutableBytesPtr invalidateKey : invalidateList) {
                     metaDataCache.invalidate(invalidateKey);
                 }

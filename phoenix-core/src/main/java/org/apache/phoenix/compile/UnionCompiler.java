@@ -93,7 +93,6 @@ public class UnionCompiler {
             projectedColumns.add(projectedColumn);
         }
         Long scn = statement.getConnection().getSCN();
-        // TODO: samarth this is likely just an in memory reference for compilation purposes. Probably ok to pass non-encoded scheme and null counter.
         PTable tempTable = PTableImpl.makePTable(statement.getConnection().getTenantId(),
             UNION_SCHEMA_NAME, UNION_TABLE_NAME, PTableType.SUBQUERY, null,
             HConstants.LATEST_TIMESTAMP, scn == null ? HConstants.LATEST_TIMESTAMP : scn,

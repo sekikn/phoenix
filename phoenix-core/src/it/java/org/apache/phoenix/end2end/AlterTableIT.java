@@ -2247,7 +2247,7 @@ public class AlterTableIT extends ParallelStatsDisabledIT {
 
 	        // assert that the client side cache is updated.
 	        EncodedCQCounter cqCounter = baseTable.getEncodedCQCounter();
-	        assertEquals((Integer)(ENCODED_CQ_COUNTER_INITIAL_VALUE + 1), cqCounter.getValue(QueryConstants.DEFAULT_COLUMN_FAMILY));
+	        assertEquals((Integer)(ENCODED_CQ_COUNTER_INITIAL_VALUE + 1), cqCounter.getNextQualifier(QueryConstants.DEFAULT_COLUMN_FAMILY));
 	        
 	        
 	        // assert that the server side metadata is updated correctly.
@@ -2262,9 +2262,9 @@ public class AlterTableIT extends ParallelStatsDisabledIT {
 	        PTable view = phxConn.getTable(new PTableKey(phxConn.getTenantId(), fullViewName));
 
 	        // verify that the client side cache is updated. Base table's cq counters should be updated.
-	        assertEquals((Integer)(ENCODED_CQ_COUNTER_INITIAL_VALUE + 2), baseTable.getEncodedCQCounter().getValue(DEFAULT_COLUMN_FAMILY));
-	        assertEquals((Integer)(ENCODED_CQ_COUNTER_INITIAL_VALUE + 1), baseTable.getEncodedCQCounter().getValue("A"));
-	        assertNull("A view should always have the null cq counter", view.getEncodedCQCounter().getValue(DEFAULT_COLUMN_FAMILY));
+	        assertEquals((Integer)(ENCODED_CQ_COUNTER_INITIAL_VALUE + 2), baseTable.getEncodedCQCounter().getNextQualifier(DEFAULT_COLUMN_FAMILY));
+	        assertEquals((Integer)(ENCODED_CQ_COUNTER_INITIAL_VALUE + 1), baseTable.getEncodedCQCounter().getNextQualifier("A"));
+	        assertNull("A view should always have the null cq counter", view.getEncodedCQCounter().getNextQualifier(DEFAULT_COLUMN_FAMILY));
 	        
 	        // assert that the server side metadata for the base table and the view is also updated correctly.
 	        assertEncodedCQCounter(DEFAULT_COLUMN_FAMILY, schemaName, baseTableName, ENCODED_CQ_COUNTER_INITIAL_VALUE + 2, true);
@@ -2297,7 +2297,7 @@ public class AlterTableIT extends ParallelStatsDisabledIT {
 
 	        // assert that the client side cache is updated.
 	        EncodedCQCounter cqCounter = baseTable.getEncodedCQCounter();
-	        assertEquals((Integer)(ENCODED_CQ_COUNTER_INITIAL_VALUE + 1), cqCounter.getValue(QueryConstants.DEFAULT_COLUMN_FAMILY));
+	        assertEquals((Integer)(ENCODED_CQ_COUNTER_INITIAL_VALUE + 1), cqCounter.getNextQualifier(QueryConstants.DEFAULT_COLUMN_FAMILY));
 
 
 	        // assert that the server side metadata is updated correctly.
@@ -2312,8 +2312,8 @@ public class AlterTableIT extends ParallelStatsDisabledIT {
 	        PTable view = phxConn.getTable(new PTableKey(phxConn.getTenantId(), fullViewName));
 
 	        // verify that the client side cache is updated. Base table's cq counters should be updated.
-	        assertEquals((Integer)(ENCODED_CQ_COUNTER_INITIAL_VALUE + 3), baseTable.getEncodedCQCounter().getValue(DEFAULT_COLUMN_FAMILY));
-	        assertNull("A view should always have the null cq counter", view.getEncodedCQCounter().getValue(DEFAULT_COLUMN_FAMILY));
+	        assertEquals((Integer)(ENCODED_CQ_COUNTER_INITIAL_VALUE + 3), baseTable.getEncodedCQCounter().getNextQualifier(DEFAULT_COLUMN_FAMILY));
+	        assertNull("A view should always have the null cq counter", view.getEncodedCQCounter().getNextQualifier(DEFAULT_COLUMN_FAMILY));
 
 	        // assert that the server side metadata for the base table and the view is also updated correctly.
 	        assertEncodedCQCounter(DEFAULT_COLUMN_FAMILY, schemaName, baseTableName, ENCODED_CQ_COUNTER_INITIAL_VALUE + 3, true);
@@ -2352,7 +2352,7 @@ public class AlterTableIT extends ParallelStatsDisabledIT {
             // assert that the client side cache is updated.
             baseTable = phxConn.getTable(new PTableKey(phxConn.getTenantId(), fullTableName));
             EncodedCQCounter encodedCqCounter = baseTable.getEncodedCQCounter();
-            assertEquals((Integer)(ENCODED_CQ_COUNTER_INITIAL_VALUE + 3), encodedCqCounter.getValue(DEFAULT_COLUMN_FAMILY));
+            assertEquals((Integer)(ENCODED_CQ_COUNTER_INITIAL_VALUE + 3), encodedCqCounter.getNextQualifier(DEFAULT_COLUMN_FAMILY));
             
             // assert that the server side metadata is updated correctly.
             assertEncodedCQCounter(DEFAULT_COLUMN_FAMILY, schemaName, baseTableName, ENCODED_CQ_COUNTER_INITIAL_VALUE + 3, true);
@@ -2384,12 +2384,12 @@ public class AlterTableIT extends ParallelStatsDisabledIT {
             // assert that the client cache for the base table is updated
             baseTable = phxConn.getTable(new PTableKey(phxConn.getTenantId(), fullTableName));
             encodedCqCounter = baseTable.getEncodedCQCounter();
-            assertEquals((Integer)(ENCODED_CQ_COUNTER_INITIAL_VALUE + 8), encodedCqCounter.getValue(DEFAULT_COLUMN_FAMILY));
+            assertEquals((Integer)(ENCODED_CQ_COUNTER_INITIAL_VALUE + 8), encodedCqCounter.getNextQualifier(DEFAULT_COLUMN_FAMILY));
             
             // assert client cache for view
             PTable view = phxConn.getTable(new PTableKey(phxConn.getTenantId(), fullViewName));
             encodedCqCounter = view.getEncodedCQCounter();
-            assertNull("A view should always have the column qualifier counter as null", view.getEncodedCQCounter().getValue(DEFAULT_COLUMN_FAMILY));
+            assertNull("A view should always have the column qualifier counter as null", view.getEncodedCQCounter().getNextQualifier(DEFAULT_COLUMN_FAMILY));
             
             // assert that the server side metadata for the base table and the view is also updated correctly.
             assertEncodedCQCounter(DEFAULT_COLUMN_FAMILY, schemaName, baseTableName, ENCODED_CQ_COUNTER_INITIAL_VALUE + 8, true);
@@ -2409,12 +2409,12 @@ public class AlterTableIT extends ParallelStatsDisabledIT {
             
             // assert that the client cache for the base table is updated 
             encodedCqCounter = baseTable.getEncodedCQCounter();
-            assertEquals((Integer)(ENCODED_CQ_COUNTER_INITIAL_VALUE + 10), encodedCqCounter.getValue(DEFAULT_COLUMN_FAMILY));
+            assertEquals((Integer)(ENCODED_CQ_COUNTER_INITIAL_VALUE + 10), encodedCqCounter.getNextQualifier(DEFAULT_COLUMN_FAMILY));
             
             // assert client cache for view
             view = phxConn.getTable(new PTableKey(phxConn.getTenantId(), fullViewName));
             encodedCqCounter = view.getEncodedCQCounter();
-            assertNull("A view should always have the column qualifier counter as null", view.getEncodedCQCounter().getValue(DEFAULT_COLUMN_FAMILY));
+            assertNull("A view should always have the column qualifier counter as null", view.getEncodedCQCounter().getNextQualifier(DEFAULT_COLUMN_FAMILY));
             
             // assert that the server side metadata for the base table and the view is also updated correctly.
             assertEncodedCQCounter(DEFAULT_COLUMN_FAMILY, schemaName, baseTableName, (ENCODED_CQ_COUNTER_INITIAL_VALUE + 10), true);

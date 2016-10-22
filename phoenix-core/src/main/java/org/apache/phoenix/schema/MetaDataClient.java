@@ -2099,10 +2099,10 @@ public class MetaDataClient {
                         cqCounterFamily = defaultFamilyName != null ? defaultFamilyName : DEFAULT_COLUMN_FAMILY;
                     }
                 }
-                Integer encodedCQ =  isPkColumn ? null : cqCounter.getValue(cqCounterFamily);   
+                Integer encodedCQ =  isPkColumn ? null : cqCounter.getNextQualifier(cqCounterFamily);   
                 PColumn column = newColumn(position++, colDef, pkConstraint, defaultFamilyName, false, encodedCQ);
                 if (cqCounter.increment(cqCounterFamily)) {
-                    changedCqCounters.put(cqCounterFamily, cqCounter.getValue(cqCounterFamily));
+                    changedCqCounters.put(cqCounterFamily, cqCounter.getNextQualifier(cqCounterFamily));
                 }
                 if (SchemaUtil.isPKColumn(column)) {
                     // TODO: remove this constraint?
@@ -3086,7 +3086,6 @@ public class MetaDataClient {
                             Integer encodedCQ = null;
                             if (!colDef.isPK()) {
                                 String colDefFamily = colDef.getColumnDefName().getFamilyName();
-                                //FIXME: samarth Think about local indexes. They have a different column family
                                 String familyName = null;
                                 StorageScheme storageScheme = table.getStorageScheme();
                                 String defaultColumnFamily = tableForCQCounters.getDefaultFamilyName() != null && !Strings.isNullOrEmpty(tableForCQCounters.getDefaultFamilyName().getString()) ? 
@@ -3099,10 +3098,10 @@ public class MetaDataClient {
                                 } else {
                                     familyName = defaultColumnFamily;
                                 }
-                                encodedCQ = cqCounterToUse.getValue(familyName);
+                                encodedCQ = cqCounterToUse.getNextQualifier(familyName);
                                 if (cqCounterToUse.increment(familyName)) {
                                     changedCqCounters.put(familyName,
-                                        cqCounterToUse.getValue(familyName));
+                                        cqCounterToUse.getNextQualifier(familyName));
                                 }
                             }
                             PColumn column = newColumn(position++, colDef, PrimaryKeyConstraint.EMPTY, table.getDefaultFamilyName() == null ? null : table.getDefaultFamilyName().getString(), true, encodedCQ);
@@ -3247,7 +3246,6 @@ public class MetaDataClient {
                         }
                         return new MutationState(0,connection);
                     }
-
                     // Only update client side cache if we aren't adding a PK column to a table with indexes or
                     // transitioning a table from non transactional to transactional.
                     // We could update the cache manually then too, it'd just be a pain.
@@ -3268,6 +3266,7 @@ public class MetaDataClient {
                                                                         updateCacheFrequency == null ? table.getUpdateCacheFrequency() : updateCacheFrequency,
                                                                                 table.isNamespaceMapped(),
                                                                                 resolvedTimeStamp);
+                        table = connection.getTable(new PTableKey(connection.getTenantId(), table.getName().getString()));
                     } else if (updateCacheFrequency != null) {
                         // Force removal from cache as the update cache frequency has changed
                         // Note that clients outside this JVM won't be affected.

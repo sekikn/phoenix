@@ -442,7 +442,6 @@ abstract public class BaseScannerRegionObserver extends BaseRegionObserver {
                             tupleProjector, dataRegion, indexMaintainer, viewConstants, ptr);
                     }
                     if (projector != null) {
-                        // TODO: samarth think if this is the right thing to do here.
                         Tuple toProject = useQualifierAsListIndex ? new PositionBasedResultTuple(result) : new ResultTuple(Result.create(result));
                         Tuple tuple = projector.projectResults(toProject);
                         result.clear();
@@ -540,7 +539,6 @@ abstract public class BaseScannerRegionObserver extends BaseRegionObserver {
                 byte[] value = kvSchema.toBytes(tuple, arrayFuncRefs,
                         kvSchemaBitSet, ptr);
                 // Add a dummy kv with the exact value of the array index
-                // TODO: samarth how does this dummy column qualifier play with encoded column names
                 result.add(new KeyValue(rowKv.getRowArray(), rowKv.getRowOffset(), rowKv.getRowLength(),
                         QueryConstants.ARRAY_VALUE_COLUMN_FAMILY, 0, QueryConstants.ARRAY_VALUE_COLUMN_FAMILY.length,
                         QueryConstants.ARRAY_VALUE_COLUMN_QUALIFIER, 0,

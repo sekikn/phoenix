@@ -58,7 +58,6 @@ public class ArrayColumnExpression extends KeyValueColumnExpression {
     public ArrayColumnExpression(PColumn column, String displayName, boolean encodedColumnName) {
         super(column, column.getFamilyName().getBytes(), column.getFamilyName().getBytes());
         this.displayName = SchemaUtil.getColumnDisplayName(column.getFamilyName().getString(), column.getName().getString());
-        // TODO: samarth think about the case when the encodedcolumn qualifier is null. Probably best to add a check here for encodedcolumnname to be true
         this.encodedCQ = column.getEncodedColumnQualifier();
     }
 

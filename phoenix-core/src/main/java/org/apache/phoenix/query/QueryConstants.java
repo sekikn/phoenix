@@ -240,7 +240,6 @@ public interface QueryConstants {
     public static final int DIVERGED_VIEW_BASE_COLUMN_COUNT = -100;
     public static final int BASE_TABLE_BASE_COLUMN_COUNT = -1;
     
-    //TODO: samarth think about this more.
     /**
      * We mark counter values 0 to 10 as reserved. Value 0 is used by {@link #ENCODED_EMPTY_COLUMN_NAME}. Values 1-10
      * are reserved for special column qualifiers returned by Phoenix co-processors.
@@ -390,7 +389,4 @@ public interface QueryConstants {
     public static final byte[] OFFSET_COLUMN = "c_offset".getBytes();
     public static final String LAST_SCAN = "LAST_SCAN";
     public static final byte[] UPGRADE_MUTEX = "UPGRADE_MUTEX".getBytes();
-    //TODO: samarth we may or may not have to tweak this constant for short/long/int column qualifer schemes.
-    //Qualifier used for the cell that stores various column values using the storage scheme StorageScheme#COLUMNS_STORED_IN_SINGLE_CELL
-    //public static final ImmutableBytesPtr SINGLE_CELL_COLUMN_QUALIFIER = new ImmutableBytesPtr(PInteger.INSTANCE.toBytes(ENCODED_CQ_COUNTER_INITIAL_VALUE)); 
 }

@@ -47,6 +47,7 @@ import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.io.ImmutableBytesWritable;
 import org.apache.hadoop.hbase.io.encoding.DataBlockEncoding;
 import org.apache.hadoop.hbase.util.Bytes;
+import org.apache.hadoop.hbase.util.Pair;
 import org.apache.phoenix.exception.DataExceedsCapacityException;
 import org.apache.phoenix.exception.SQLExceptionCode;
 import org.apache.phoenix.exception.SQLExceptionInfo;
@@ -70,6 +71,7 @@ import org.apache.phoenix.schema.PNameFactory;
 import org.apache.phoenix.schema.PTable;
 import org.apache.phoenix.schema.PTableType;
 import org.apache.phoenix.schema.RowKeySchema;
+import org.apache.phoenix.schema.PTable.StorageScheme;
 import org.apache.phoenix.schema.RowKeySchema.RowKeySchemaBuilder;
 import org.apache.phoenix.schema.SaltingUtil;
 import org.apache.phoenix.schema.SortOrder;
@@ -1060,5 +1062,30 @@ public class SchemaUtil {
                 throw new DataExceedsCapacityException(tableName + "." + column.getName().getString() + " may not exceed " + maxLength + " bytes (" + type.toObject(byteValue) + ")");
             }
         }
+    }
+    
+    public static Map<String, Pair<Integer, Integer>> getQualifierRanges(PTable table) {
+        Preconditions.checkArgument(table.getStorageScheme() == StorageScheme.ENCODED_COLUMN_NAMES,
+            "Use this method only for tables with storage scheme "
+                    + StorageScheme.ENCODED_COLUMN_NAMES.name());
+        Map<String, Pair<Integer, Integer>> toReturn = Maps.newHashMapWithExpectedSize(table.getColumns().size());
+        for (PColumn column : table.getColumns()) {
+            if (!isPKColumn(column)) {
+                String colFamily = column.getFamilyName().getString();
+                Pair<Integer, Integer> minMaxQualifiers = toReturn.get(colFamily);
+                Integer encodedColumnQualifier = column.getEncodedColumnQualifier();
+                if (minMaxQualifiers == null) {
+                    minMaxQualifiers = new Pair<>(encodedColumnQualifier, encodedColumnQualifier);
+                    toReturn.put(colFamily, minMaxQualifiers);
+                } else {
+                    if (encodedColumnQualifier < minMaxQualifiers.getFirst()) {
+                        minMaxQualifiers.setFirst(encodedColumnQualifier);
+                    } else if (encodedColumnQualifier > minMaxQualifiers.getSecond()) {
+                        minMaxQualifiers.setSecond(encodedColumnQualifier);
+                    }
+                }
+            }
+        }
+        return toReturn;
     }
 }
